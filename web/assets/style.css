@@ -55,7 +55,7 @@ button { font: inherit; color: inherit; }
 /* ── 书叶：文武边栏 ─────────────────── */
 .ye {
   position: relative;
-  max-width: 880px; margin: 18px auto 56px; padding: 44px 52px 40px;
+  width: calc(100% - 28px); max-width: 880px; margin: 18px auto 56px; padding: 44px clamp(26px, 6vw, 52px) 40px;
   background: var(--paper);
   border: 3px solid var(--ink);
   box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 18px 40px -22px rgba(60, 40, 10, .55);
@@ -303,7 +303,7 @@ button { font: inherit; color: inherit; }
 @media (max-width: 640px) {
   body { font-size: 16px; }
   .mei { padding: 14px 16px 0; }
-  .ye { margin: 12px 8px 36px; padding: 30px 18px 28px; border-width: 2px; }
+  .ye { width: auto; margin: 12px 8px 36px; padding: 30px 18px 28px; border-width: 2px; }
   .ye::before { inset: 4px; }
   .qian { padding: 16px 10px; min-height: 262px; gap: 8px; }
   .qian b { font-size: 25px; }
