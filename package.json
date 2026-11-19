@@ -1,0 +1,27 @@
+{
+  "name": "tuiqiao",
+  "version": "0.1.0",
+  "description": "推敲：由大模型出题的诗词小游戏（SKILL + CLI + 网页）",
+  "type": "module",
+  "bin": {
+    "tuiqiao": "bin/tuiqiao.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "src",
+    "data",
+    "web",
+    "skill",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "build:data": "node scripts/build-data.mjs"
+  },
+  "license": "MIT",
+  "private": true
+}
