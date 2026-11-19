@@ -197,6 +197,7 @@ View = {
     mode: 'zi'|'ju'|'fu',
     freeText: boolean,                 // 自由体 + 自赋：没有格子，只有一个文本框
     text: string|null,                 // freeText 时的草稿
+    glosses?: [{ j: number, text: string }],  // 仅 freeText：已取的句意（此时没有 board 可挂）
     patternShown: boolean,             // fu 档恒为 true（自由体除外）；zi / ju 档取了 pattern 提示后为 true
     variantLabel: string|null,         // patternShown 时给出，如「仄起首句入韵」
     board: null | { ju: [{             // freeText 时为 null

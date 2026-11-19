@@ -1,0 +1,340 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  calculateScore, check, createGame, hint, reveal, saveDraft, setMode,
+  setReview, submit, toResult, toView,
+} from '../../../src/game/index.js';
+import * as prosody from './fake-prosody.js';
+import { input, originalIssue } from './fake-prosody.js';
+
+const stamp = '2026-01-02T03:04:05.000Z';
+const deps = { prosody, id: 'abc123', now: stamp };
+const make = (source = input, options = {}) => createGame(source, { ...deps, ...options });
+const conflict = action => assert.throws(action, { status: 409, code: 'conflict' });
+const invalid = action => assert.throws(action, { status: 400, code: 'invalid-input' });
+
+function checkInvalid(source, pattern) {
+  assert.throws(() => make(source), error =>
+    Array.isArray(error.errors) && error.errors.some(message => pattern.test(message)));
+}
+
+test('建局拒绝缺失、格式错误、挖空错位及不合格律的输入', () => {
+  checkInvalid(null, /JSON 对象/);
+  for (const key of ['title', 'subjects', 'premise', 'form', 'rhymebook', 'story', 'poem']) {
+    const source = { ...input };
+    delete source[key];
+    checkInvalid(source, new RegExp(key));
+  }
+  for (const [key, value] of [
+    ['title', '  '], ['subjects', []], ['subjects', ['水路', 1]], ['premise', 'fiction'],
+    ['rhymebook', 'other'], ['premiseNote', null], ['note', 7], ['cloze', 7],
+    ['cloze', input.cloze + '！'], ['cloze', input.cloze.replace('【玄】', '【【玄】】')],
+    ['cloze', input.cloze.replace('【玄】', '【】玄')], ['cloze', input.cloze.replace('【玄】', '【玄')],
+    ['cloze', input.poem.replace('，', '【，】')], ['hiddenLines', [0, 4]], ['hiddenLines', [5]],
+    ['hiddenLines', [1, 2, 3, 4]], ['hiddenLines', [1.1]], ['glosses', ['短']],
+    ['glosses', ['一', '二', '', '四']], ['imagery', Array(9).fill('太多')],
+  ]) {
+    checkInvalid({ ...input, [key]: value }, new RegExp(key));
+  }
+  checkInvalid({ ...input, poem: '。' }, /汉字/);
+  const wrong = { ...input, poem: '玄杉晚渡，孤鹤隐晴光。\n曲涧承钟影，回舟入夜塘。' };
+  delete wrong.cloze;
+  assert.throws(() => make(wrong), error => error.report?.stats.errors === 1 && /句数或字数/.test(error.errors[0]));
+  const tolerated = make(wrong, { allowFlaws: true });
+  assert.equal(tolerated.original.ok, false);
+  assert.equal(tolerated.original.issues[0].code, 'length');
+  setMode(tolerated, 'zi', deps);
+  assert.equal(toView(tolerated).play.board.ju[0].cells.length, 4);
+});
+
+test('缺省挖空可复现且覆盖每句，Unicode 字位按原作和标点对齐', () => {
+  const { cloze, hiddenLines, glosses, imagery, note, premiseNote, ...source } = input;
+  const first = make(source);
+  const again = make(source);
+  assert.deepEqual(first.cloze, again.cloze);
+  assert.equal(first.cloze.length, 6);
+  assert.equal(new Set(first.cloze.map(key => key.split('.')[0])).size, 4);
+  assert.deepEqual(first.hiddenLines, [1, 3]);
+  assert.deepEqual(first.imagery, []);
+  assert.equal(first.glosses, null);
+  assert.equal(first.note, null);
+  assert.equal(first.premiseNote, null);
+  assert.equal(first.createdAt, stamp);
+  const unicode = make({
+    ...input, poem: input.poem.replace('玄杉', '𠀀杉'),
+    cloze: input.cloze.replace('【玄】杉', '【𠀀杉】'),
+  });
+  assert.deepEqual(unicode.cloze, ['0.0', '0.1', '1.1', '1.4', '2.3', '3.3']);
+  for (const form of ['浣溪沙', '逸体']) assert.deepEqual(make({ ...source, form }).hiddenLines, [1, 3]);
+  const one = make({ ...source, form: '逸体', poem: '山。' });
+  assert.deepEqual(one.cloze, ['0.0']);
+  assert.deepEqual(one.hiddenLines, []);
+});
+
+test('四个状态的 View 只显示此时可见的信息', () => {
+  const flawed = {
+    ...prosody,
+    checkPoem(args) {
+      const report = prosody.checkPoem(args);
+      if (!args.partial) {
+        report.issues.push(originalIssue);
+        report.stats.errors++;
+        report.ok = false;
+      }
+      return report;
+    },
+  };
+  const flawedDeps = { ...deps, prosody: flawed };
+  const secret = [...'玄鹤光钟夜', input.note, ...input.glosses, ...input.imagery, originalIssue.message];
+  const game = make(input, { allowFlaws: true, prosody: flawed });
+  function doesNotLeak() {
+    const view = toView(game);
+    const json = JSON.stringify(view);
+    for (const value of secret) assert.ok(!json.includes(value), `${game.status} 泄露了 ${value}`);
+    assert.equal(view.reveal, null);
+    return view;
+  }
+
+  assert.equal(doesNotLeak().play, null);
+  assert.deepEqual(toView(game).modes.map(mode => mode.blanks), [5, 2, 20]);
+  setMode(game, 'zi', flawedDeps);
+  const { play } = doesNotLeak();
+  assert.equal(play.board.ju[0].rhyme, null);
+  assert.deepEqual(play.board.ju[0].cells[0], {
+    kind: 'blank', char: null, input: null, want: null, fb: null,
+  });
+  hint(game, { type: 'pattern' });
+  assert.equal(doesNotLeak().play.board.ju[0].cells[0].want, '平');
+  submit(game, { cells: {} }, flawedDeps);
+  assert.equal(doesNotLeak().status, 'submitted');
+  reveal(game);
+  const { reveal: unveiled } = toView(game);
+  assert.equal(unveiled.poem, input.poem);
+  assert.equal(unveiled.note, input.note);
+  assert.deepEqual(unveiled.glosses, input.glosses);
+  assert.deepEqual(unveiled.imagery, input.imagery);
+  assert.deepEqual(unveiled.issues, [originalIssue]);
+  assert.equal(unveiled.ju[0].cells[0].char, '玄');
+
+  for (const [mode, hidden] of [['ju', '孤鹤隐晴光回舟入夜塘'], ['fu', '玄鹤光钟夜']]) {
+    const trial = make(input, { allowFlaws: true, prosody: flawed });
+    setMode(trial, mode, flawedDeps);
+    check(trial, { cells: {} }, flawedDeps);
+    const view = JSON.stringify(toView(trial));
+    for (const value of [...hidden, input.note, ...input.glosses, ...input.imagery, originalIssue.message]) {
+      assert.ok(!view.includes(value), `${mode} 泄露了 ${value}`);
+    }
+  }
+});
+
+test('填字与补句反馈按优先级分配，草稿只取首个字符', () => {
+  const zi = make();
+  setMode(zi, 'zi', deps);
+  saveDraft(zi, { cells: { '0.0': '山水', '0.1': '鹤', '9.0': '多', '_bad': '夜' } }, deps);
+  let play = toView(zi).play;
+  assert.equal(play.checks, 0);
+  assert.equal(play.board.ju[0].cells[0].input, '山');
+  assert.equal(play.board.ju[0].cells[0].fb, null);
+  assert.equal(play.board.ju[0].cells[1].input, null);
+  check(zi, { cells: { '0.0': '玄', '1.1': '多', '1.4': '堂', '2.3': '雨' } }, deps);
+  play = toView(zi).play;
+  assert.equal(play.checks, 1);
+  assert.deepEqual([play.board.ju[0].cells[0].fb, play.board.ju[1].cells[1].fb,
+    play.board.ju[1].cells[4].fb, play.board.ju[2].cells[3].fb, play.board.ju[3].cells[3].fb],
+  ['hit', 'tone', 'rhyme', 'miss', null]);
+
+  const ju = make();
+  setMode(ju, 'ju', deps);
+  const cells = { '1.0': '晴', '1.1': '晴', '1.2': '隐', '1.3': '山', '1.4': '堂' };
+  check(ju, { cells }, deps);
+  assert.deepEqual(toView(ju).play.board.ju[1].cells.map(cell => cell.fb),
+    ['present', 'miss', 'hit', 'tone', 'rhyme']);
+  check(ju, { cells: { ...cells, '1.3': '晴' } }, deps);
+  assert.deepEqual(toView(ju).play.board.ju[1].cells.map(cell => cell.fb),
+    ['tone', 'miss', 'hit', 'hit', 'rhyme']);
+  invalid(() => saveDraft(ju, { text: '' }));
+  invalid(() => saveDraft(ju, { cells: { '1.0': true } }));
+});
+
+test('自赋用玩家 Report 决定诗的变体，固定词的变体并支持自由文本', () => {
+  const calls = [];
+  const options = {
+    prosody: {
+      ...prosody,
+      checkPoem(args) {
+        calls.push(args);
+        return prosody.checkPoem(args);
+      },
+    },
+  };
+  const shi = make();
+  setMode(shi, 'fu', options);
+  const initial = toView(shi).play;
+  assert.equal(initial.variantLabel, '正体');
+  assert.equal(initial.report, null);
+  assert.ok(initial.board.ju.every(row => row.cells.every(cell => cell.kind === 'blank' && cell.fb === null && cell.char === null)));
+  saveDraft(shi, { cells: { '0.0': '雨', '0.3': '多' } }, options);
+  assert.equal(toView(shi).play.variantLabel, '变体一');
+  assert.equal(toView(shi).play.report, null);
+  check(shi, { cells: { '0.0': '雨', '0.3': '多' } }, options);
+  assert.deepEqual(calls.at(-1).ju, ['雨□□多', '', '', '']);
+  assert.equal(calls.at(-1).variant, 'auto');
+  assert.equal(toView(shi).play.board.ju[0].cells[0].want, '仄');
+  assert.equal(toView(shi).play.checks, 0);
+  assert.deepEqual(toView(shi).play.report.stats, { errors: 0, warns: 0 });
+  assert.equal(toView(shi).play.report.complete, false);
+  check(shi, { cells: {} }, options);
+  assert.equal(calls.at(-1).variant, 0);
+  assert.equal(toView(shi).play.variantLabel, '正体');
+  assert.equal(toView(shi).play.board.ju[0].cells[0].want, '平');
+
+  const ci = make({ ...input, form: '浣溪沙' });
+  setMode(ci, 'fu', options);
+  check(ci, { cells: { '0.0': '雨' } }, options);
+  assert.equal(calls.at(-1).variant, 0);
+  assert.equal(toView(ci).play.variantLabel, '正体');
+
+  const free = make({ ...input, form: '逸体' });
+  setMode(free, 'fu', options);
+  invalid(() => saveDraft(free, { cells: {} }));
+  check(free, { text: '落花。' }, options);
+  hint(free, { type: 'gloss', j: 1 });
+  const view = toView(free).play;
+  assert.equal(view.freeText, true);
+  assert.equal(view.patternShown, false);
+  assert.equal(view.text, '落花。');
+  assert.equal(view.board, null);
+  assert.deepEqual(view.glosses, [{ j: 1, text: input.glosses[1] }]);
+  assert.ok(!JSON.stringify(view).includes(input.glosses[0]));
+  submit(free, { text: '沉花。' }, { ...options, now: stamp });
+  assert.equal(toResult(free).player, '沉花。');
+  assert.equal(toResult(free).score, null);
+  assert.deepEqual(toResult(free).diffs, []);
+});
+
+test('只能降档，累计次数与已取的提示保留，草稿和反馈清空', () => {
+  const game = make();
+  invalid(() => setMode(game, 'unknown', deps));
+  conflict(() => saveDraft(game, { cells: {} }, deps));
+  setMode(game, 'fu', deps);
+  check(game, { cells: { '0.0': '多' } }, deps);
+  hint(game, { type: 'imagery' });
+  conflict(() => setMode(game, 'fu', deps));
+  setMode(game, 'ju', deps);
+  assert.equal(toView(game).play.board.ju[1].cells[0].input, null);
+  assert.equal(toView(game).play.report, null);
+  conflict(() => setMode(game, 'fu', deps));
+  check(game, { cells: { '1.4': '堂' } }, deps);
+  hint(game, { type: 'pattern' });
+  hint(game, { type: 'char', j: 1, i: 1 });
+  hint(game, { type: 'gloss', j: 1 });
+  setMode(game, 'zi', deps);
+  const { play } = toView(game);
+  assert.equal(play.board.ju[1].cells[4].input, null);
+  assert.equal(play.board.ju[1].cells[4].fb, null);
+  assert.equal(play.board.ju[1].cells[1].kind, 'hinted');
+  assert.equal(play.board.ju[1].gloss, input.glosses[1]);
+  assert.equal(play.checks, 1);
+  assert.deepEqual(play.hints, { pattern: true, chars: 1, glosses: 1, imagery: [input.imagery[0]] });
+  conflict(() => setMode(game, 'ju', deps));
+  submit(game, { cells: {} }, deps);
+  conflict(() => setMode(game, 'zi', deps));
+});
+
+test('四种提示只显示已取内容并拒绝不可用请求', () => {
+  const game = make();
+  conflict(() => hint(game, { type: 'pattern' }));
+  setMode(game, 'zi', deps);
+  invalid(() => hint(game, { type: 'other' }));
+  hint(game, { type: 'pattern' });
+  hint(game, { type: 'pattern' });
+  assert.equal(toView(game).play.variantLabel, '正体');
+  assert.equal(toView(game).play.board.ju[1].rhyme, true);
+  conflict(() => hint(game, { type: 'char', j: 0, i: 1 }));
+  conflict(() => hint(game, { type: 'char', j: -1, i: 1 }));
+  hint(game, { type: 'char', j: 0, i: 0 });
+  assert.equal(toView(game).play.board.ju[0].cells[0].char, '玄');
+  conflict(() => hint(game, { type: 'char', j: 0, i: 0 }));
+  hint(game, { type: 'gloss', j: 0 });
+  assert.equal(toView(game).play.board.ju[0].gloss, input.glosses[0]);
+  assert.deepEqual(toView(game).play.hintsLeft.glosses, [1, 2, 3]);
+  conflict(() => hint(game, { type: 'gloss', j: 0 }));
+  conflict(() => hint(game, { type: 'gloss', j: 6 }));
+  hint(game, { type: 'imagery' });
+  assert.deepEqual(toView(game).play.hints.imagery, [input.imagery[0]]);
+  hint(game, { type: 'imagery' });
+  assert.equal(toView(game).play.hintsLeft.imagery, 0);
+  conflict(() => hint(game, { type: 'imagery' }));
+
+  const fu = make();
+  setMode(fu, 'fu', deps);
+  hint(fu, { type: 'pattern' });
+  assert.equal(toView(fu).play.hints.pattern, false);
+  conflict(() => hint(fu, { type: 'char', j: 0, i: 0 }));
+
+  const { glosses, ...source } = input;
+  const free = make({ ...source, form: '逸体' });
+  setMode(free, 'zi', deps);
+  conflict(() => hint(free, { type: 'pattern' }));
+  conflict(() => hint(free, { type: 'gloss', j: 0 }));
+});
+
+test('评分含全部扣分项、零空格和九品边界', () => {
+  const grades = [
+    [100, '上上'], [95, '上上'], [94, '上中'], [88, '上中'], [87, '上下'], [80, '上下'],
+    [79, '中上'], [70, '中上'], [69, '中中'], [60, '中中'], [59, '中下'], [50, '中下'],
+    [49, '下上'], [35, '下上'], [34, '下中'], [20, '下中'], [19, '下下'], [0, '下下'],
+  ];
+  const noHints = { chars: 0, glosses: 0, imagery: [], pattern: false };
+  for (const [points, grade] of grades) {
+    assert.deepEqual(calculateScore(points, 100, 1, noHints), { hit: points, total: 100, points, grade });
+  }
+  assert.equal(calculateScore(2, 3, 0, noHints).points, 67);
+  assert.equal(calculateScore(3, 3, 3, { chars: 2, glosses: 1, imagery: ['一', '二'], pattern: true }).points, 69);
+  assert.equal(calculateScore(1, 9, 1, { ...noHints, chars: 8 }).points, 0);
+  assert.equal(calculateScore(0, 0, 0, noHints).points, 0);
+});
+
+test('交卷、揭晓与评点状态及结果差异', () => {
+  const game = make();
+  assert.equal(toResult(game).status, 'new');
+  conflict(() => reveal(game));
+  conflict(() => setReview(game, { comment: '未交卷' }));
+  setMode(game, 'zi', deps);
+  conflict(() => reveal(game));
+  hint(game, { type: 'char', j: 0, i: 0 });
+  check(game, { cells: { '1.1': '鹤' } }, deps);
+  submit(game, { cells: { '1.1': '鹤', '1.4': '堂', '2.3': '钟', '0.0': '多' } }, deps);
+  const result = toResult(game);
+  assert.equal(result.status, 'submitted');
+  assert.equal(result.player, '玄杉晚渡霜，孤鹤隐晴堂。\n曲涧承钟影，回舟入□塘。');
+  assert.deepEqual(result.diffs, [
+    { ju: 2, pos: 5, original: '光', player: '堂', fb: 'rhyme' },
+    { ju: 4, pos: 4, original: '夜', player: '□', fb: null },
+  ]);
+  assert.deepEqual(result.score, { total: 5, hit: 2, points: 34, grade: '下中' });
+  assert.deepEqual(result.prosody, { ok: true, issues: [] });
+  assert.equal(result.checks, 1);
+  assert.equal(toView(game).play.submittedAt, stamp);
+  assert.equal(toView(game).reveal, null);
+  assert.match(result.next, /abc123/);
+  conflict(() => submit(game, { cells: {} }, deps));
+  conflict(() => check(game, { cells: {} }, deps));
+  conflict(() => hint(game, { type: 'imagery' }));
+  for (const bad of [{}, { comment: '好', grade: '高' }, { comment: '好', highlights: Array(7).fill({}) }]) {
+    invalid(() => setReview(game, bad));
+  }
+  setReview(game, { comment: '第一稿' }, deps);
+  assert.equal(toView(game).play.review.grade, null);
+  reveal(game);
+  reveal(game);
+  setReview(game, {
+    grade: '中中', comment: '再评', highlights: [{ quote: '晴堂', note: '字义相通', extra: true }],
+  }, deps);
+  assert.equal(toView(game).reveal.playerPoem, result.player);
+  assert.deepEqual(toView(game).play.review, {
+    grade: '中中', comment: '再评', highlights: [{ quote: '晴堂', note: '字义相通' }], at: stamp,
+  });
+  assert.equal(toResult(game).reviewed, true);
+  assert.equal(toResult(game).next, null);
+});
