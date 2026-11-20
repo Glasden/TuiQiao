@@ -1,4 +1,6 @@
 // 推敲 · 网页端。无框架、无构建：一个模块管路由、渲染与逐格输入。
+import { bgm, TRACKS } from './bgm.js';
+
 const app = document.getElementById('app');
 const gid = (location.pathname.match(/^\/g\/([a-z0-9]+)/i) || [])[1] || null;
 
@@ -137,8 +139,25 @@ function adopt(view, { fresh = false, checked = false } = {}) {
   }
   seatTiles();
   if (checked) S.stale.clear();
+  bgm.setMood(!view.play ? 'opening' : view.status === 'revealed' ? 'revealed' : 'playing');
   render();
   schedulePoll();
+}
+
+function checkHitRatio(view) {
+  const b = view?.play?.board;
+  if (!b) return 0.5;
+  let total = 0;
+  let hits = 0;
+  for (const line of b.ju) {
+    for (const c of line.cells) {
+      if (c.kind === 'blank' && c.fb) {
+        total++;
+        if (c.fb === 'hit') hits++;
+      }
+    }
+  }
+  return total ? hits / total : 0;
 }
 
 async function act(name, body, opts) {
@@ -146,6 +165,10 @@ async function act(name, body, opts) {
     await flushDraft(true);
     const view = await api('POST', '/api/games/' + gid + '/' + name, body);
     adopt(view, opts);
+    if (name === 'check') bgm.sfxCheck(checkHitRatio(view));
+    else if (name === 'hint') bgm.sfxHint();
+    else if (name === 'submit') bgm.sfxSeal();
+    else if (name === 'reveal') bgm.sfxReveal();
     return true;
   } catch (err) {
     toast(err.message);
@@ -289,6 +312,7 @@ function commit(inp) {
   }
   const placed = spread(k, chars);
   for (const [key, ch] of placed) setCell(key, ch);
+  if (placed.length) bgm.sfxTile();
   const keys = blankKeys();
   const last = placed[placed.length - 1][0];
   setTimeout(() => focusCell(keys[keys.indexOf(last) + 1] || last), 0);
@@ -472,11 +496,13 @@ function seat(k, id) {
   if (from) { if (old) S.tiles.set(from, old); else S.tiles.delete(from); }
   syncCell(k);
   if (from) syncCell(from);
+  bgm.sfxTile();
   paintPan();
 }
 function unseat(k) {
   S.tiles.delete(k);
   syncCell(k);
+  bgm.sfxUnseat();
   paintPan();
 }
 // 曾试之字改回去：盘上得还有这个字
@@ -733,10 +759,103 @@ const btn = (label, onclick, cls, extra) => h('button', { class: 'btn ' + (cls |
 const pu = (want) => (want ? h('i', { class: 'pu ' + PU[want], title: want === '中' ? '可平可仄' : want }) : null);
 const rhymeName = (v) => (v.rhymebook.id === 'guyun' ? (v.form.kind === 'ci' ? '词林正韵' : v.form.kind === 'shi' ? '平水韵' : '古韵') : v.rhymebook.name);
 
+// ── 雅乐控件 ──────────────────────────────────────────
+let yueOpen = false;
+
+function syncYue() {
+  const st = bgm.state();
+  const btnEl = app.querySelector('.yue-btn');
+  if (btnEl) {
+    btnEl.classList.toggle('on', st.playing);
+    btnEl.classList.toggle('wait', !st.playing && st.pending);
+    btnEl.setAttribute('aria-pressed', String(st.playing));
+    btnEl.title = st.playing
+      ? '暂停雅乐（正奏：' + st.trackInfo.name + '）'
+      : st.pending ? '点按续奏「' + st.trackInfo.name + '」' : '奏起背景雅乐';
+  }
+  const moreEl = app.querySelector('.yue-more');
+  if (moreEl) {
+    moreEl.classList.toggle('on', yueOpen);
+    moreEl.setAttribute('aria-expanded', String(yueOpen));
+  }
+  const pop = app.querySelector('.yue-pop');
+  if (pop) {
+    pop.hidden = !yueOpen;
+    pop.querySelectorAll('[data-track]').forEach((el) => {
+      const on = el.dataset.track === st.track;
+      el.classList.toggle('on', on);
+      el.setAttribute('aria-pressed', String(on));
+    });
+    const vol = pop.querySelector('.yue-vol');
+    if (vol && document.activeElement !== vol) vol.value = String(Math.round(st.volume * 100));
+    const sfx = pop.querySelector('.yue-sfx');
+    if (sfx) {
+      sfx.classList.toggle('on', st.sfx);
+      sfx.setAttribute('aria-pressed', String(st.sfx));
+    }
+  }
+}
+
+bgm.onChange(syncYue);
+document.addEventListener('pointerdown', (e) => {
+  if (yueOpen && !e.target.closest?.('.yue')) { yueOpen = false; syncYue(); }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && yueOpen) { yueOpen = false; syncYue(); }
+});
+
+function yueNav() {
+  const st = bgm.state();
+  const wave = h('i', { class: 'yue-wave', 'aria-hidden': 'true' }, h('span'), h('span'), h('span'));
+  const playBtn = h('button', {
+    class: 'yue-btn' + (st.playing ? ' on' : st.pending ? ' wait' : ''),
+    type: 'button',
+    'aria-pressed': String(st.playing),
+    title: st.playing ? '暂停雅乐（正奏：' + st.trackInfo.name + '）' : '奏起背景雅乐',
+    onclick: () => bgm.toggle(),
+  }, wave, '雅乐');
+  const moreBtn = h('button', {
+    class: 'yue-more' + (yueOpen ? ' on' : ''),
+    type: 'button',
+    'aria-expanded': String(yueOpen),
+    'aria-label': '选曲与调音',
+    title: '选曲与调音',
+    onclick: () => { yueOpen = !yueOpen; syncYue(); },
+  }, '选曲');
+  const volInput = h('input', {
+    class: 'yue-vol',
+    type: 'range',
+    min: '5',
+    max: '100',
+    step: '1',
+    'aria-label': '声量',
+    oninput: (e) => bgm.setVolume(Number(e.target.value) / 100),
+  });
+  volInput.value = String(Math.round(st.volume * 100));
+  const pop = h('div', { class: 'yue-pop', role: 'dialog', 'aria-label': '雅乐选曲', hidden: !yueOpen },
+    h('div', { class: 'yue-hd' }, '雅乐', h('small', {}, '丝弦竹管')),
+    h('ul', { class: 'yue-list' }, TRACKS.map((t) => h('li', {}, h('button', {
+      class: 'yue-item' + (t.id === st.track ? ' on' : ''),
+      type: 'button',
+      'data-track': t.id,
+      'aria-pressed': String(t.id === st.track),
+      onclick: () => bgm.setTrack(t.id),
+    }, h('b', {}, t.name), h('small', {}, t.sub))))),
+    h('div', { class: 'yue-ctrl' },
+      h('label', { class: 'yue-row' }, h('span', {}, '声量'), volInput),
+      h('div', { class: 'yue-row' }, h('span', {}, '落字清音'), h('button', {
+        class: 'yue-sfx' + (st.sfx ? ' on' : ''),
+        type: 'button',
+        'aria-pressed': String(st.sfx),
+        onclick: () => bgm.setSfx(!bgm.state().sfx),
+      }, '开关'))));
+  return h('span', { class: 'yue' }, playBtn, moreBtn, pop);
+}
+
 function mei() {
   return h('div', { class: 'mei' },
     h('a', { class: 'hao', href: '/', 'aria-label': '推敲 · 卷帙' }, seal('推敲'), h('b', {}, '推敲')),
-    h('nav', {}, h('a', { href: '/' }, '卷帙')));
+    h('nav', {}, yueNav(), h('a', { href: '/' }, '卷帙')));
 }
 
 // 诗笺：自右向左的竖排。ju 是句的数组；cell(j, i) 造格，foot(j) 造句脚。
@@ -1066,9 +1185,10 @@ function render() {
 }
 
 async function boot() {
+  bgm.armAutoResume();
   try {
     if (gid) adopt(await api('GET', '/api/games/' + gid), { fresh: true });
-    else { S.games = (await api('GET', '/api/games')).games; render(); }
+    else { bgm.setMood('home'); S.games = (await api('GET', '/api/games')).games; render(); }
   } catch (err) {
     app.replaceChildren(mei(), h('main', { class: 'ye' }, h('div', { class: 'kong-ye' },
       err.status === 404 ? '查无此卷。' : '取卷未成：' + err.message, h('br'), h('a', { href: '/' }, '回卷帙'))));

@@ -46,11 +46,88 @@ button { font: inherit; color: inherit; }
 .hao { display: flex; align-items: center; gap: 12px; }
 .hao .yin { width: 38px; height: 38px; font-size: 15px; line-height: 1.05; }
 .hao b { font: 400 22px/1 var(--kai); letter-spacing: .5em; }
+.mei nav { display: flex; align-items: center; gap: 20px; }
 .mei nav a {
   font: 15px var(--kai); letter-spacing: .3em; color: var(--ink-2);
   padding: 4px 2px; border-bottom: 1px solid transparent;
 }
 .mei nav a:hover { color: var(--zhu); border-color: var(--zhu-soft); }
+
+/* ── 雅乐（书眉） ───────────────────── */
+.yue { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+.yue-btn, .yue-more {
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 4px 2px;
+  border: 0; border-bottom: 1px solid transparent; background: none;
+  font: 15px var(--kai); letter-spacing: .24em; color: var(--ink-2);
+  transition: color .15s, border-color .15s;
+}
+.yue-more { font-size: 13px; letter-spacing: .16em; color: var(--ink-3); }
+.yue-btn:hover, .yue-more:hover, .yue-btn.on, .yue-more.on { color: var(--zhu); border-color: var(--zhu-soft); }
+.yue-btn.wait { color: var(--zhe); }
+.yue-btn:focus-visible, .yue-more:focus-visible { outline: 1px solid var(--zhu); outline-offset: 3px; }
+.yue-wave { display: inline-flex; align-items: flex-end; gap: 2px; width: 11px; height: 12px; }
+.yue-wave span {
+  display: block; width: 2px; height: 4px; background: currentColor; border-radius: 1px;
+  transition: height .2s;
+}
+.yue-wave span:nth-child(2) { height: 7px; }
+.yue-wave span:nth-child(3) { height: 5px; }
+.yue-btn.on .yue-wave span { animation: yue-bar 1.35s ease-in-out infinite; }
+.yue-btn.on .yue-wave span:nth-child(2) { animation-delay: .28s; }
+.yue-btn.on .yue-wave span:nth-child(3) { animation-delay: .56s; }
+@keyframes yue-bar {
+  0%, 100% { height: 3px; opacity: .55; }
+  50% { height: 12px; opacity: 1; }
+}
+.yue-pop {
+  position: absolute; right: 0; top: calc(100% + 12px); z-index: 30; width: 232px;
+  padding: 14px 16px 14px; background: var(--paper-hi);
+  border: 1px solid var(--ink); outline: 1px solid var(--ink); outline-offset: 3px;
+  box-shadow: 0 16px 32px -18px rgba(45, 30, 8, .65);
+}
+.yue-pop[hidden] { display: none; }
+.yue-hd {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--rule);
+  font: 15px var(--kai); letter-spacing: .38em; color: var(--zhu);
+}
+.yue-hd small { font-size: 12px; letter-spacing: .14em; color: var(--ink-3); }
+.yue-list { list-style: none; margin: 0; padding: 0; }
+.yue-list li + li { margin-top: 4px; }
+.yue-item {
+  width: 100%; text-align: left; cursor: pointer; padding: 6px 8px;
+  border: 1px solid transparent; background: transparent;
+  display: flex; flex-direction: column; gap: 1px;
+  transition: background .15s, border-color .15s;
+}
+.yue-item:hover { background: rgba(233, 222, 197, .45); }
+.yue-item.on { border-color: var(--zhu-soft); background: rgba(165, 55, 43, .06); }
+.yue-item b { font: 400 15px/1.4 var(--kai); letter-spacing: .22em; color: var(--ink); }
+.yue-item.on b { color: var(--zhu); }
+.yue-item.on b::before { content: "●"; font-size: 8px; vertical-align: 2px; margin-right: 6px; color: var(--zhu); }
+.yue-item small { font: 12px/1.5 var(--kai); letter-spacing: .1em; color: var(--ink-3); }
+.yue-ctrl {
+  margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--rule);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.yue-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font: 13px var(--kai); letter-spacing: .14em; color: var(--ink-2);
+}
+.yue-vol {
+  flex: 1; accent-color: var(--zhu); cursor: pointer; height: 4px; margin: 0;
+}
+.yue-sfx {
+  position: relative; width: 34px; height: 18px; padding: 0; cursor: pointer; font-size: 0;
+  border: 1px solid var(--ink-3); background: rgba(233, 222, 197, .65);
+  transition: background .15s, border-color .15s;
+}
+.yue-sfx::after {
+  content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px;
+  background: var(--ink-3); transition: transform .15s, background .15s;
+}
+.yue-sfx.on { border-color: var(--zhu); background: rgba(165, 55, 43, .14); }
+.yue-sfx.on::after { transform: translateX(16px); background: var(--zhu); }
 
 /* ── 书叶：文武边栏 ─────────────────── */
 .ye {
@@ -416,6 +493,8 @@ button.zi:focus-visible { outline: 2px solid var(--zhu); outline-offset: 2px; }
 @media (max-width: 640px) {
   body { font-size: 16px; }
   .mei { padding: 14px 16px 0; }
+  .mei nav { gap: 14px; }
+  .yue-pop { right: -36px; width: 218px; }
   .ye { width: auto; margin: 12px 8px 36px; padding: 30px 18px 28px; border-width: 2px; }
   .ye::before { inset: 4px; }
   .qian { padding: 16px 10px; min-height: 262px; gap: 8px; }
