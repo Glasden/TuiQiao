@@ -773,7 +773,8 @@ class AcousticEngine {
     this.moodFilter.frequency.setTargetAtTime(freq, now, 0.8);
   }
 
-  // Karplus-Strong 丝弦物理建模（分数延迟保证音准，拨弦点梳状滤波塑造古琴/古筝音色）
+  // 模态丝弦物理建模：按频率分层衰减泛音 + 轻柔木腔拨弦瞬态
+  // 相比原始 Karplus-Strong，低音散音浑厚温润、绝无锯齿毛刺，且音准精准
   _getStringBuffer(midiNum, style) {
     const key = style + ':' + midiNum;
     if (this.stringCache.has(key)) return this.stringCache.get(key);
@@ -782,80 +783,85 @@ class AcousticEngine {
     const sr = ctx.sampleRate;
     const freq = m2f(midiNum);
     const isQin = style === 'qin';
-    const dur = isQin ? Math.min(4.6, Math.max(2.4, 240 / freq)) : Math.min(3.6, Math.max(2.0, 190 / freq));
+    const dur = isQin ? Math.min(4.6, Math.max(2.6, 260 / freq)) : Math.min(3.4, Math.max(2.0, 200 / freq));
     const len = Math.floor(sr * dur);
     const buf = ctx.createBuffer(1, len, sr);
     const out = buf.getChannelData(0);
 
-    // 环路延时与分数延迟校正（考虑两抽头低通引入的 0.5 采样群延迟）
-    const exactPeriod = sr / freq - 0.5;
-    const delayInt = Math.max(2, Math.floor(exactPeriod));
-    const frac = exactPeriod - delayInt;
-    const ring = new Float32Array(delayInt + 2);
+    const maxH = isQin ? 10 : 14;
+    const pluckPos = isQin ? 0.27 : 0.16;
+    const stiffness = isQin ? 0.00006 : 0.00014;
+    const baseTau = isQin
+      ? Math.min(2.6, Math.max(0.95, 195 / Math.pow(freq, 0.85)))
+      : Math.min(2.1, Math.max(0.75, 155 / Math.pow(freq, 0.85)));
 
-    // 拨弦激励：柔化的粉红/低通噪声 + 拨弦位置梳状抵消（古琴约在 1/4 弦长，古筝更近岳山）
-    const pluckPos = isQin ? 0.24 : 0.12;
-    const combDelay = Math.max(1, Math.round(delayInt * pluckPos));
-    const raw = new Float32Array(delayInt + combDelay + 2);
-    let smooth = 0;
-    const excLp = isQin ? 0.24 : 0.48;
-    for (let i = 0; i < raw.length; i++) {
+    const harmonics = [];
+    for (let h = 1; h <= maxH; h++) {
+      const fh = h * freq * Math.sqrt(1 + stiffness * h * h);
+      if (fh > (isQin ? 2600 : 5000)) break;
+      const pluckShape = h <= 2 ? 1.0 : (0.46 + 0.54 * Math.abs(Math.sin(Math.PI * h * pluckPos)));
+      const rolloff = isQin
+        ? (h === 1 ? 1.0 : h === 2 ? 0.70 : h === 3 ? 0.34 : 0.46 / Math.pow(h, 1.82))
+        : (h === 1 ? 0.88 : h === 2 ? 0.76 : h === 3 ? 0.48 : 0.72 / Math.pow(h, 1.45));
+      // 低音粗弦（<160Hz）大幅收敛四次以上高次谐波，消除生硬毛刺，保留丝弦温厚共鸣
+      const lowWarmth = isQin && freq < 165 && h >= 4 ? Math.pow(freq / 165, (h - 3) * 0.52) : 1.0;
+      const amp = rolloff * pluckShape * lowWarmth;
+      if (amp < 0.003) continue;
+
+      const decayExp = isQin ? 1.7 : 1.38;
+      const tau = baseTau / (1 + (isQin ? 0.58 : 0.34) * Math.pow(h - 1, decayExp));
+      const phase = (h * 0.73) % (Math.PI * 2);
+      harmonics.push({ fh, amp, tau, phase, w: (2 * Math.PI * fh) / sr });
+    }
+
+    for (const p of harmonics) {
+      const attSec = isQin ? (p.fh < 280 ? 0.011 : 0.0045) : 0.0035;
+      const attN = Math.max(1, Math.floor(sr * attSec));
+      const decMul = Math.exp(-1 / (p.tau * sr));
+      let env = p.amp;
+      const cosW = Math.cos(p.w);
+      const sinW = Math.sin(p.w);
+      let s = Math.sin(p.phase);
+      let c = Math.cos(p.phase);
+      for (let i = 0; i < len; i++) {
+        let g = env;
+        if (i < attN) g *= 0.5 - 0.5 * Math.cos((Math.PI * i) / attN);
+        out[i] += s * g;
+        env *= decMul;
+        const ns = s * cosW + c * sinW;
+        c = c * cosW - s * sinW;
+        s = ns;
+      }
+    }
+
+    // 柔和的指腹触弦与桐木琴腔瞬态（二阶低通塑形，绝不刺耳）
+    const thumpLen = Math.floor(sr * (isQin ? 0.036 : 0.022));
+    let lp1 = 0;
+    let lp2 = 0;
+    const thumpAlpha = isQin ? 0.075 : 0.15;
+    const thumpAmp = isQin ? 0.16 : 0.13;
+    for (let i = 0; i < thumpLen && i < len; i++) {
+      const t = i / thumpLen;
       const n = Math.random() * 2 - 1;
-      smooth += excLp * (n - smooth);
-      // 柔和的指腹触弦包络
-      const win = Math.sin((Math.PI * i) / raw.length);
-      raw[i] = smooth * (0.55 + 0.45 * win);
+      lp1 += thumpAlpha * (n - lp1);
+      lp2 += thumpAlpha * (lp1 - lp2);
+      const env = Math.sin(Math.PI * Math.pow(t, 0.55)) * Math.exp(-t * 3.8);
+      out[i] += lp2 * env * thumpAmp * 4.2;
     }
-    let dc = 0;
-    for (let i = 0; i < delayInt; i++) {
-      ring[i] = raw[i + combDelay] - raw[i] * (isQin ? 0.82 : 0.68);
-      dc += ring[i];
-    }
-    dc /= delayInt;
-    for (let i = 0; i < delayInt; i++) ring[i] -= dc;
 
-    // 频率相关衰减：低音粗丝弦余韵悠长，高音自然收敛
-    const baseDecay = isQin
-      ? 0.9968 - Math.min(0.0055, (freq - 80) * 0.0000085)
-      : 0.9958 - Math.min(0.005, (freq - 120) * 0.0000075);
-    const blend = isQin ? 0.56 : 0.42; // 古琴低通更重，音色更温润浑厚
-
-    let ptr = 0;
-    let prev = 0;
-    let bodyLp = 0;
     let maxAbs = 0.0001;
-
     for (let i = 0; i < len; i++) {
-      const nextPtr = (ptr + 1) % delayInt;
-      const cur = ring[ptr];
-      const nxt = ring[nextPtr];
-      // 分数延迟线性插值
-      const interp = cur * (1 - frac) + nxt * frac;
-      const filtered = (interp * (1 - blend) + prev * blend) * baseDecay;
-      prev = interp;
-      ring[ptr] = filtered;
-      ptr = nextPtr;
-
-      // 琴箱温润低通
-      bodyLp += (isQin ? 0.36 : 0.62) * (filtered - bodyLp);
-      const val = isQin ? bodyLp : filtered * 0.7 + bodyLp * 0.3;
-      out[i] = val;
-      const a = Math.abs(val);
+      const a = Math.abs(out[i]);
       if (a > maxAbs) maxAbs = a;
     }
-
-    // 归一化并做 4ms 柔顺淡入与尾部淡出，彻底避免爆音
-    const norm = 0.85 / maxAbs;
-    const attackN = Math.min(len, Math.floor(sr * (isQin ? 0.0045 : 0.0028)));
-    const fadeOutN = Math.min(len, Math.floor(sr * 0.12));
+    const norm = 0.82 / maxAbs;
+    const fadeOutN = Math.min(len, Math.floor(sr * 0.15));
     for (let i = 0; i < len; i++) {
       let g = norm;
-      if (i < attackN) g *= i / attackN;
       if (i > len - fadeOutN) g *= (len - i) / fadeOutN;
       out[i] *= g;
     }
 
-    // 缓存上限控制
     if (this.stringCache.size > 160) {
       const first = this.stringCache.keys().next().value;
       this.stringCache.delete(first);
@@ -905,15 +911,18 @@ class AcousticEngine {
       vibOsc.stop(time + dur + 0.3);
     }
 
-    // 木质共鸣均衡
+    // 随音高自适应温润低通：古琴低音散音绝不刺耳
+    const freq = m2f(m);
     const tone = ctx.createBiquadFilter();
-    tone.type = 'peaking';
-    tone.frequency.value = style === 'qin' ? 280 : 620;
-    tone.Q.value = 1.2;
-    tone.gain.value = style === 'qin' ? 2.6 : 1.5;
+    tone.type = 'lowpass';
+    tone.frequency.value = style === 'qin'
+      ? Math.min(2400, Math.max(460, freq * 5.2))
+      : Math.min(4600, Math.max(1200, freq * 7.5));
+    tone.Q.value = 0.55;
 
     const env = ctx.createGain();
-    const peak = Math.max(0.01, vel * (style === 'qin' ? 0.62 : 0.48));
+    const bassTame = style === 'qin' && m < 52 ? 0.78 : 1.0;
+    const peak = Math.max(0.01, vel * bassTame * (style === 'qin' ? 0.56 : 0.46));
     env.gain.setValueAtTime(peak, time);
     env.gain.setValueAtTime(peak, time + Math.max(0.15, dur * 0.72));
     env.gain.exponentialRampToValueAtTime(0.0008, time + dur + 0.65);
@@ -1021,7 +1030,7 @@ class AcousticEngine {
     bFilter.frequency.value = Math.min(3400, freq * 2.1);
     bFilter.Q.value = 2.4;
     const bGain = ctx.createGain();
-    const bPeak = vel * 0.14;
+    const bPeak = vel * 0.095;
     const bSettle = Math.min(dur * 0.88, attack + 0.18);
     bGain.gain.setValueAtTime(0.0001, time);
     bGain.gain.linearRampToValueAtTime(bPeak * 1.45, time + attack * 0.55); // 起吹气头
@@ -1065,8 +1074,8 @@ class AcousticEngine {
     const base = m2f(midi(note));
     const partials = [
       { ratio: 1.0, amp: 1.0, decay: dur },
-      { ratio: 2.756, amp: 0.28, decay: dur * 0.42 },
-      { ratio: 5.404, amp: 0.08, decay: dur * 0.16 },
+      { ratio: 2.756, amp: 0.22, decay: dur * 0.38 },
+      ...(base * 5.404 < 4500 ? [{ ratio: 5.404, amp: 0.04, decay: dur * 0.14 }] : []),
     ];
     const panner = this._panNode(ctx, pan);
     panner.connect(bus || this.musicBus);
