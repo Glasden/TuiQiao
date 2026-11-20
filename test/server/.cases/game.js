@@ -156,6 +156,43 @@ test('填字与补句反馈按优先级分配，草稿只取首个字符', () =>
   invalid(() => saveDraft(ju, { cells: { '1.0': true } }));
 });
 
+test('繁简同字：繁体所填与原作简体同字算 hit，补句的 present 与交卷差异亦然', () => {
+  const zi = make();
+  setMode(zi, 'zi', deps);
+  check(zi, { cells: { '1.1': '鶴', '2.3': '鐘' } }, deps);
+  let play = toView(zi).play;
+  assert.deepEqual([play.board.ju[1].cells[1].fb, play.board.ju[2].cells[3].fb], ['hit', 'hit']);
+  submit(zi, { cells: { '1.1': '鶴', '2.3': '鐘' } }, deps);
+  assert.equal(toView(zi).play.score.hit, 2);
+  assert.deepEqual(toResult(zi).diffs.map(diff => diff.original), ['玄', '光', '夜']);
+
+  const ju = make();
+  setMode(ju, 'ju', deps);
+  check(ju, { cells: { '1.0': '隱', '1.1': '鶴' } }, deps);
+  play = toView(ju).play;
+  assert.deepEqual(play.board.ju[1].cells.slice(0, 2).map(cell => cell.fb), ['present', 'hit']);
+});
+
+test('词依古韵、原作韵组依平水韵通押时，韵脚位按平水韵也算韵合', () => {
+  // 原作韵组记作平水韵名「七阳」；词林正韵只给部名，须改查平水韵才配得上
+  const ciProsody = {
+    ...prosody,
+    charInfo(char, rhymebook, kind) {
+      const info = prosody.charInfo(char);
+      if (kind !== 'ci') return info;
+      return { ...info, readings: info.readings.map(reading => ({ ...reading, rhyme: '第二部' })) };
+    },
+  };
+  const ciDeps = { ...deps, prosody: ciProsody };
+  const game = make({ ...input, form: '浣溪沙', rhymebook: 'guyun' }, ciDeps);
+  assert.equal(game.original.rhymes[0].name, '七阳');
+  setMode(game, 'zi', ciDeps);
+  check(game, { cells: { '1.4': '堂' } }, ciDeps);
+  assert.equal(toView(game).play.board.ju[1].cells[4].fb, 'rhyme');
+  check(game, { cells: { '1.4': '同' } }, ciDeps);
+  assert.equal(toView(game).play.board.ju[1].cells[4].fb, 'tone');
+});
+
 test('自赋用玩家 Report 决定诗的变体，固定词的变体并支持自由文本', () => {
   const calls = [];
   const options = {

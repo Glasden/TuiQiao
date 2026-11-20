@@ -3,7 +3,7 @@ import { resolveForm, shiTones } from './forms.js';
 import { alignText, poemInput } from './text.js';
 import { checkRhymes } from './rhymes.js';
 
-export { charInfo, RHYMEBOOKS } from './data.js';
+export { charInfo, RHYMEBOOKS, simplify } from './data.js';
 export { listForms, resolveForm, sampleForms } from './forms.js';
 export { splitPoem } from './text.js';
 

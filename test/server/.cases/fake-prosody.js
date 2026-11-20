@@ -35,6 +35,11 @@ const definitions = [['wujue', '五绝', 'shi', 5], ['qijue', '七绝', 'shi', 7
     })),
   }));
 
+const traditional = { 鶴: '鹤', 鐘: '钟', 隱: '隐', 塘: '塘' };
+export function simplify(char) {
+  return Object.hasOwn(traditional, char) ? traditional[char] : char;
+}
+
 export function resolveForm(name) {
   return definitions.find(form => [form.name, form.id].includes(name)) ?? null;
 }

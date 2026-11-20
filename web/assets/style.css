@@ -180,6 +180,8 @@ button { font: inherit; color: inherit; }
   background: linear-gradient(to top right, transparent calc(50% - .8px), var(--ink-2) calc(50% - .8px), var(--ink-2) calc(50% + .8px), transparent calc(50% + .8px));
 }
 .cell.fb-miss input.ch { color: var(--ink-3); -webkit-text-fill-color: var(--ink-3); }
+/* 当前格：失焦后仍留朱框，揭字、问句意都对着它 */
+.cell.cur input.ch { border-color: var(--zhu); background: rgba(255,255,255,.5); }
 @keyframes quan { from { transform: scale(1.5); opacity: 0; } to { transform: none; opacity: 1; } }
 
 .cell .yi-zi { /* 校记：君作某 */

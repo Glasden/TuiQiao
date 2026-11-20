@@ -7,7 +7,8 @@ const S = {
   inputs: new Map(),   // 'j.i' → 玩家所填；本地为准，服务端的 input 只在初次载入与换档时采用
   stale: new Set(),    // 上次「试」之后又改过的格，其反馈作废
   text: '',            // 自由体的草稿
-  cur: null,           // 最近聚焦的格
+  cur: null,           // 最近聚焦的格；失焦后仍高亮，揭字、句意都对着它
+  edit: null,          // 这次输入开始前格里的字与选区，用来分辨新字是替换旧字还是接在旁边
   composing: false,
   dirty: false,
   saveTimer: 0,
@@ -16,8 +17,24 @@ const S = {
   pollUntil: 0,
 };
 
-const NUM = '〇一二三四五六七八九十';
-const cn = (n) => (n <= 10 ? NUM[n] : n < 20 ? '十' + NUM[n - 10] : NUM[Math.floor(n / 10)] + '十' + (n % 10 ? NUM[n % 10] : ''));
+const NUM = '〇一二三四五六七八九';
+// 小写中文数字：十一、二十、一百零五、一百一十、一千零二十
+function cn(n) {
+  n = Math.max(0, Math.floor(n));
+  if (n < 10) return NUM[n];
+  if (n < 20) return '十' + (n % 10 ? NUM[n % 10] : '');
+  if (n >= 10000) return String(n);
+  const digits = [...String(n)].map(Number);
+  let out = '';
+  let gap = false;
+  digits.forEach((d, x) => {
+    if (!d) { gap = true; return; }
+    if (gap && out) out += '零';
+    gap = false;
+    out += NUM[d] + ['', '十', '百', '千'][digits.length - 1 - x];
+  });
+  return out;
+}
 const isHan = (c) => /\p{Script=Han}/u.test(c);
 const paras = (s) => String(s || '').split(/\n+/).map((x) => x.trim()).filter(Boolean);
 const MODE = {
@@ -182,34 +199,75 @@ function setCell(k, ch) {
   touch();
 }
 
+// 输入开始前记下格里的字与选区。输入法组字期间的 beforeinput 不算，只认 compositionstart 那一刻
+function markEdit(inp) {
+  S.edit = { k: inp.dataset.k, value: inp.value, start: inp.selectionStart, end: inp.selectionEnd };
+}
+
+// 从输入后的值里取出这次新敲的字：选区以外的旧字（光标停在旧字前后）剥掉，选中的旧字已被替换，一字不剥
+function typed(raw, old, edit) {
+  if (!old) return raw;
+  if (edit && edit.value === old && edit.start != null) {
+    const head = old.slice(0, edit.start);
+    const tail = old.slice(edit.end ?? edit.start);
+    if (raw.length >= head.length + tail.length && raw.startsWith(head) && raw.endsWith(tail)) {
+      return raw.slice(head.length, raw.length - tail.length);
+    }
+    return raw;
+  }
+  // 没记到选区时只能猜：多出来的部分算新字
+  if (raw.length > old.length) {
+    if (raw.startsWith(old)) return raw.slice(old.length);
+    if (raw.endsWith(old)) return raw.slice(0, -old.length);
+  }
+  return raw;
+}
+
+// 一次敲进多个字（输入法整句上屏）时，顺着读序往紧挨着的格里铺：
+// 碰到原作给出的字，所敲与之相同就越过，不同就停；填字档的空零散，不跨句。
+function spread(k, chars) {
+  const b = board();
+  const cross = S.view.play.mode !== 'zi';
+  let [j, i] = k.split('.').map(Number);
+  const out = [];
+  for (const ch of chars) {
+    const cell = b.ju[j]?.cells[i];
+    if (!cell) break;
+    if (cell.kind === 'blank') out.push([j + '.' + i, ch]);
+    else if (cell.char !== ch) break;
+    if (++i >= b.ju[j].cells.length) {
+      if (!cross) break;
+      j++;
+      i = 0;
+    }
+  }
+  return out;
+}
+
 function commit(inp) {
   const k = inp.dataset.k;
   const old = S.inputs.get(k) || '';
-  let raw = inp.value;
+  const edit = S.edit?.k === k ? S.edit : null;
+  S.edit = null;
+  const raw = inp.value;
   if (raw === old) return;
-  // 光标没选中旧字时，新字会接在旧字前后：把旧字剥掉
-  if (old && raw.length > old.length) {
-    if (raw.startsWith(old)) raw = raw.slice(old.length);
-    else if (raw.endsWith(old)) raw = raw.slice(0, -old.length);
-  }
-  const chars = [...raw].filter(isHan);
+  const chars = [...typed(raw, old, edit)].filter(isHan);
   if (!chars.length) {
     if (raw === '') setCell(k, ''); else inp.value = old;
     return;
   }
-  // 一次敲进多个字（输入法整句上屏）时，顺着读序往后铺
+  const placed = spread(k, chars);
+  for (const [key, ch] of placed) setCell(key, ch);
   const keys = blankKeys();
-  const at = keys.indexOf(k);
-  const n = Math.min(chars.length, keys.length - at);
-  for (let x = 0; x < n; x++) setCell(keys[at + x], chars[x]);
-  const next = keys[at + n];
-  setTimeout(() => focusCell(next || keys[at + n - 1]), 0);
+  const last = placed[placed.length - 1][0];
+  setTimeout(() => focusCell(keys[keys.indexOf(last) + 1] || last), 0);
 }
 
 function onBoardInput(e) {
   const inp = e.target;
   if (!inp.matches || !inp.matches('input.ch')) return;
-  if (e.type === 'compositionstart') { S.composing = true; return; }
+  if (e.type === 'compositionstart') { S.composing = true; markEdit(inp); return; }
+  if (e.type === 'beforeinput') { if (!e.isComposing && !S.composing) markEdit(inp); return; }
   if (e.type === 'compositionend') { S.composing = false; commit(inp); return; }
   if (e.isComposing || S.composing) return;
   commit(inp);
@@ -245,12 +303,20 @@ function onBoardKey(e) {
   }
 }
 
+function markCur() {
+  app.querySelectorAll('.cur-col, .cell.cur').forEach((el) => el.classList.remove('cur-col', 'cur'));
+  if (!S.cur || locked()) return;
+  const cell = cellEl(S.cur);
+  cell?.closest('.col')?.classList.add('cur-col');
+  if (cell?.querySelector('input.ch')) cell.classList.add('cur');
+}
+
 function onBoardFocus(e) {
   const inp = e.target;
   if (!inp.matches || !inp.matches('input.ch')) return;
+  if (S.edit?.k !== inp.dataset.k) S.edit = null;
   S.cur = inp.dataset.k;
-  app.querySelectorAll('.cur-col').forEach((el) => el.classList.remove('cur-col'));
-  inp.closest('.col')?.classList.add('cur-col');
+  markCur();
   if (inp.value) setTimeout(() => { if (document.activeElement === inp && !S.composing) inp.select(); }, 0);
 }
 
@@ -357,7 +423,7 @@ function playBoard(v) {
       return h('div', { class: cls.join(' '), 'data-cell': k }, pu(c.want), ch);
     },
   });
-  for (const type of ['input', 'compositionstart', 'compositionend']) el.addEventListener(type, onBoardInput);
+  for (const type of ['beforeinput', 'input', 'compositionstart', 'compositionend']) el.addEventListener(type, onBoardInput);
   el.addEventListener('keydown', onBoardKey);
   el.addEventListener('focusin', onBoardFocus);
   return el;
@@ -517,7 +583,7 @@ function reveal(v) {
     if (c.ok === false) cls.push('bad');
     if (mine?.kind === 'hinted') cls.push('hinted');
     if (mine?.kind === 'blank') {
-      if (mine.input === c.char) cls.push('fb-hit');
+      if (mine.fb === 'hit' || mine.input === c.char) cls.push('fb-hit');  // 交卷时已按繁简同字判过
       else { cls.push('orig-miss'); if (mine.input) note = h('span', { class: 'yi-zi', title: '君作「' + mine.input + '」' }, mine.input); }
     }
     return h('div', { class: cls.join(' ') }, pu(c.want), h('span', { class: 'ch' }, c.char), note);
@@ -579,6 +645,7 @@ function render() {
   const keep = document.activeElement?.dataset?.k;
   const y = window.scrollY;
   app.replaceChildren(mei(), gid ? renderGame() : renderHome(S.games || []));
+  markCur();
   if (keep) focusCell(keep);
   window.scrollTo(0, y);
 }

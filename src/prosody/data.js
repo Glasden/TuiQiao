@@ -16,6 +16,12 @@ export const RHYMEBOOKS = [
 
 const modernSheng = ['阴平', '阳平', '上', '去'];
 
+// 繁体单字折成简体；无映射（含本是简体）则原样返回
+export function simplify(char) {
+  const table = readData('simplified');
+  return Object.hasOwn(table, char) ? table[char] : char;
+}
+
 function modernReadings(char) {
   const { names, byChar } = readData('xinyun');
   return (Object.hasOwn(byChar, char) ? byChar[char] : []).map(([sheng, rhyme, pinyin]) => ({
@@ -27,7 +33,7 @@ function modernReadings(char) {
 }
 
 export function charInfo(char, rhymebook, kind = 'shi') {
-  const simplified = () => readData('simplified')[char] ?? char;
+  const simplified = () => simplify(char);
   const modern = () => {
     const direct = modernReadings(char);
     return direct.length ? direct : modernReadings(simplified());

@@ -179,17 +179,25 @@ export function saveDraft(game, input, { prosody } = {}) {
 function feedback(game, prosody) {
   const { mode, cells, hinted } = game.play;
   const result = {};
-  const info = char => prosody.charInfo(char, game.rhymebook.id, game.form.kind);
+  const book = game.rhymebook.id;
+  const info = char => prosody.charInfo(char, book, game.form.kind);
+  // 繁简视为同字：两边都折成简体再比
+  const fold = char => prosody.simplify?.(char) ?? char;
+  // 词依古韵时，韵组可能依平水韵通押，name 便是平水韵名而非词林部名，两部韵书都要查
+  const rhymesOf = (char, tone) => [
+    info(char),
+    ...(book === 'guyun' && game.form.kind === 'ci' ? [prosody.charInfo(char, 'guyun', 'shi')] : []),
+  ].flatMap(({ readings }) => readings.filter(reading => reading.tone === tone).map(reading => reading.rhyme));
   for (const [j] of game.layout.entries()) {
     const row = rowData(game, j);
     const remaining = new Map();
     for (const [i, { char }] of row.cells.entries()) {
       const key = keyFor(j, i);
       if (!blankAt(game, j, i) || hinted.includes(key)) continue;
-      if (cells[key] === char) {
+      if (cells[key] && fold(cells[key]) === fold(char)) {
         result[key] = 'hit';
       } else {
-        remaining.set(char, (remaining.get(char) ?? 0) + 1);
+        remaining.set(fold(char), (remaining.get(fold(char)) ?? 0) + 1);
       }
     }
     const rhyme = game.original.rhymes.find(group => group.group === row.rhymeGroup);
@@ -197,13 +205,12 @@ function feedback(game, prosody) {
       const key = keyFor(j, i);
       const input = cells[key];
       if (!input || result[key]) continue;
-      const { tones, readings } = info(input);
-      if (i === row.rhymeIndex && row.rhyme && rhyme?.name &&
-          readings.some(reading => reading.rhyme === rhyme.name && reading.tone === rhyme.tone)) {
+      const { tones } = info(input);
+      if (i === row.rhymeIndex && row.rhyme && rhyme?.name && rhymesOf(input, rhyme.tone).includes(rhyme.name)) {
         result[key] = 'rhyme';
-      } else if (mode === 'ju' && remaining.get(input) > 0) {
+      } else if (mode === 'ju' && remaining.get(fold(input)) > 0) {
         result[key] = 'present';
-        remaining.set(input, remaining.get(input) - 1);
+        remaining.set(fold(input), remaining.get(fold(input)) - 1);
       } else {
         result[key] = tones.some(tone => (got ?? info(char).tones).includes(tone)) ? 'tone' : 'miss';
       }
@@ -437,7 +444,9 @@ function differences(game) {
     if (!blankAt(game, j, i) || hinted.includes(key)) return [];
     const original = originalChar(game, offset);
     const player = cells[key] ?? square;
-    return player === original ? [] : [{ ju: j + 1, pos: i + 1, original, player, fb: feedback[key] ?? null }];
+    // 交卷时的反馈已按繁简同字判过 hit，以它为准
+    const same = player === original || (terminal(game) && feedback[key] === 'hit');
+    return same ? [] : [{ ju: j + 1, pos: i + 1, original, player, fb: feedback[key] ?? null }];
   }));
 }
 

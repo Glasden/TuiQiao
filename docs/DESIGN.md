@@ -41,6 +41,7 @@ listForms({ kind, commonOnly } = {})   // → FormSummary[]
 sampleForms(n = 4, rng = Math.random)  // → FormSummary[]，从常用体裁里随机取 n 个，至少含 1 个诗体和 1 个词牌（n ≥ 2 时）
 resolveForm(nameOrAlias)               // → FormDef | null（接受别名、「七言绝句」这类全称、带「·」后缀的写法）
 charInfo(ch, rhymebook, kind = 'shi')  // → CharInfo
+simplify(ch)                           // → string，繁体单字折成简体（data/simplified.json），无映射则原样
 splitPoem(text)                        // → { ju: [{ text, punct }], stanzaBreaks: number[] }
 checkPoem({ form, rhymebook, text, ju, variant = 'auto', partial = false }) // → Report
 ~~~
@@ -234,9 +235,9 @@ fu 档的 board：诗用所选体裁的句结构，\`want\` 随玩家草稿在�
 
 反馈 \`fb\`（只打在 blank 格上，按优先级取第一个成立的）：
 
-1. \`hit\`：与原作同字。
-2. \`rhyme\`：该格是韵脚位，所填字与本组原作韵脚同韵部且声调合。
-3. \`present\`：仅 ju 档——该字在原作同一句的其它位置出现（按字数配对，类似猜词游戏的「位置不对」）。
+1. \`hit\`：与原作同字（繁简视为同字，两边都经 \`simplify\` 折成简体再比）。
+2. \`rhyme\`：该格是韵脚位，所填字与本组原作韵脚同韵部且声调合。本组韵部即原作 Report 里的 \`rhymes[].name\`；词依古韵而该组依平水韵通押时，\`name\` 是平水韵名，此时按所填字的平水韵读音比。
+3. \`present\`：仅 ju 档——该字在原作同一句的其它位置出现（按字数配对，类似猜词游戏的「位置不对」；繁简同字）。
 4. \`tone\`：平仄与原作该字相同（多音字任一读音相同即可）。
 5. \`miss\`：以上皆非。空格不打反馈（null）。
 
