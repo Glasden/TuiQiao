@@ -1,11 +1,14 @@
-import { conflict, invalid, isRecord, nonempty } from './validation.js';
+import { conflict, invalid, isRecord, nonempty, seedRank } from './validation.js';
 
 export { createGame, GameError } from './validation.js';
 
 const modes = [
-  { id: 'zi', name: '填字' },
-  { id: 'ju', name: '补句' },
-  { id: 'fu', name: '自赋' },
+  { id: 'ze', name: '择字', group: 'xuan' },
+  { id: 'bian', name: '辨字', group: 'xuan' },
+  { id: 'chai', name: '拆篇', group: 'xuan' },
+  { id: 'zi', name: '填字', group: 'xie' },
+  { id: 'ju', name: '补句', group: 'xie' },
+  { id: 'fu', name: '自赋', group: 'xie' },
 ];
 const grades = [
   [95, '上上'], [88, '上中'], [80, '上下'], [70, '中上'], [60, '中中'],
@@ -15,6 +18,11 @@ const square = '□';
 const keyFor = (j, i) => `${j}.${i}`;
 const originalChar = (game, offset) => String.fromCodePoint(game.poem.codePointAt(offset));
 const terminal = game => game.status === 'submitted' || game.status === 'revealed';
+const usesPools = mode => mode === 'ze' || mode === 'bian' || mode === 'chai';
+
+export function canBrowseRhymes(game) {
+  return game.play?.mode === 'fu' || terminal(game);
+}
 
 function requirePlaying(game) {
   if (game.status !== 'playing') throw conflict('选定难度且尚未交卷时才能进行此操作');
@@ -43,17 +51,115 @@ function rowData(game, j) {
 }
 
 function blankAt(game, j, i) {
-  if (game.play.mode === 'fu') return true;
+  if (game.play.mode === 'fu' || game.play.mode === 'chai') return true;
   if (game.play.mode === 'ju') return game.hiddenLines.includes(j);
   return game.cloze.includes(keyFor(j, i));
 }
 
 function blankCount(game, mode) {
-  if (mode === 'zi') return game.cloze.length;
+  if (mode === 'zi' || mode === 'ze' || mode === 'bian') return game.cloze.length;
   if (mode === 'ju') {
     return game.hiddenLines.reduce((sum, j) => sum + game.layout[j].offsets.length, 0);
   }
   return game.layout.reduce((sum, row) => sum + row.offsets.length, 0);
+}
+
+function seedOrder(items, keyOf) {
+  return items.map((item, i) => ({ item, rank: seedRank(keyOf(item, i)) }))
+    .sort((a, b) => a.rank - b.rank)
+    .map(({ item }) => item);
+}
+
+function makeDecoys(game, blanks, prosody) {
+  const prefix = `${game.id}/bian`;
+  const book = game.rhymebook.id;
+  const { kind } = game.form;
+  const fold = char => prosody.simplify(char);
+  const used = new Set(blanks.map(({ char }) => fold(char)));
+  const decoys = (game.decoys ?? []).filter(char => !used.has(fold(char)));
+  const target = Math.min(10, Math.max(3, Math.ceil(blanks.length / 2)));
+  if (decoys.length >= target) return decoys;
+
+  for (const char of decoys) used.add(fold(char));
+  const ordered = seedOrder(blanks, ({ key }) => `${prefix}/blank/${key}`);
+  for (let round = 0; round < 2; round++) {
+    for (const { key, char } of ordered) {
+      const { known, readings: [reading] } = prosody.charInfo(char, book, kind);
+      if (!known || !reading) continue;
+      const common = prosody.rhymeChars(reading.rhyme, book, kind, reading.tone)
+        .flatMap(({ common }) => Array.from(common));
+      const candidates = seedOrder(common, candidate => `${prefix}/pick/${key}/${candidate}`);
+      const picked = candidates.find(candidate => !used.has(fold(candidate)));
+      if (picked === undefined) continue;
+      decoys.push(picked);
+      if (decoys.length === target) return decoys;
+      used.add(fold(picked));
+    }
+  }
+  return decoys;
+}
+
+function makePools(game, mode, prosody) {
+  const cloze = new Set(game.cloze);
+  const split = mode === 'chai' && blankCount(game, mode) > 28;
+  const pools = [];
+  let ju = [];
+  let blanks = [];
+  function closePool() {
+    const tiles = blanks.map(({ char }) => char);
+    if (mode === 'bian') tiles.push(...makeDecoys(game, blanks, prosody));
+    const prefix = `${game.id}/${mode}/${pools.length}`;
+    pools.push({ ju, tiles: seedOrder(tiles, (_, i) => `${prefix}/${i}`) });
+    ju = [];
+    blanks = [];
+  }
+  for (const [j, { offsets }] of game.layout.entries()) {
+    const row = offsets.flatMap((offset, i) => {
+      const key = keyFor(j, i);
+      return mode === 'chai' || cloze.has(key) ? [{ key, char: originalChar(game, offset) }] : [];
+    });
+    if (split && blanks.length && blanks.length + row.length > 20) closePool();
+    if (row.length) {
+      ju.push(j);
+      for (const blank of row) blanks.push(blank);
+    }
+    const { stanzaEnd, rhyme } = game.original.ju[j] ?? {};
+    if (split && blanks.length && (stanzaEnd || (rhyme && blanks.length >= 10))) closePool();
+  }
+  if (!split || blanks.length) closePool();
+  return pools;
+}
+
+function availablePools(game) {
+  return (game.play.pools ?? []).map(({ ju, tiles }) => {
+    const available = tiles.slice();
+    for (const key of game.play.hinted) {
+      const [j, i] = key.split('.').map(Number);
+      if (!ju.includes(j) || !blankAt(game, j, i)) continue;
+      const char = originalChar(game, game.layout[j].offsets[i]);
+      const index = available.indexOf(char);
+      if (index !== -1) available.splice(index, 1);
+    }
+    return { ju, tiles: available };
+  });
+}
+
+function filterPoolCells(game, cells) {
+  const kept = {};
+  for (const { ju, tiles } of availablePools(game)) {
+    const counts = new Map();
+    for (const char of tiles) counts.set(char, (counts.get(char) ?? 0) + 1);
+    for (const j of ju) {
+      for (const i of game.layout[j].offsets.keys()) {
+        const key = keyFor(j, i);
+        const char = cells[key];
+        if (!counts.get(char)) continue;
+        kept[key] = char;
+        counts.set(char, counts.get(char) - 1);
+      }
+    }
+  }
+  return kept;
 }
 
 function freeText(game) {
@@ -109,19 +215,22 @@ function refreshFu(game, prosody, publish) {
 
 export function setMode(game, mode, { prosody }) {
   const index = modes.findIndex(entry => entry.id === mode);
-  if (index === -1) throw invalid('mode 须为 zi、ju 或 fu');
+  if (index === -1) throw invalid(`mode 须为以下之一：${modes.map(entry => entry.id).join('、')}`);
   if (game.status !== 'new' &&
       (game.status !== 'playing' || index >= modes.findIndex(entry => entry.id === game.play.mode))) {
     throw conflict('对局进行中只能降档，交卷后不能更换难度');
   }
   const prev = game.play;
+  const pools = usesPools(mode) ? makePools(game, mode, prosody) : null;
   game.status = 'playing';
   game.play = {
     mode,
     cells: {},
     text: game.form.kind === 'free' && mode === 'fu' ? '' : null,
     pattern: null,
+    pools,
     feedback: {},
+    tried: {},
     checks: prev?.checks ?? 0,
     patternHint: prev?.patternHint ?? false,
     hinted: prev?.hinted ?? [],
@@ -167,7 +276,7 @@ function storeDraft(game, input) {
     const [char] = value;
     if (char) cells[key] = char;
   }
-  game.play.cells = cells;
+  game.play.cells = usesPools(game.play.mode) ? filterPoolCells(game, cells) : cells;
 }
 
 export function saveDraft(game, input, { prosody } = {}) {
@@ -178,6 +287,7 @@ export function saveDraft(game, input, { prosody } = {}) {
 
 function feedback(game, prosody) {
   const { mode, cells, hinted } = game.play;
+  const poolMode = usesPools(mode);
   const result = {};
   const book = game.rhymebook.id;
   const info = char => prosody.charInfo(char, book, game.form.kind);
@@ -196,10 +306,13 @@ function feedback(game, prosody) {
       if (!blankAt(game, j, i) || hinted.includes(key)) continue;
       if (cells[key] && fold(cells[key]) === fold(char)) {
         result[key] = 'hit';
+      } else if (poolMode) {
+        if (cells[key]) result[key] = 'miss';
       } else {
         remaining.set(fold(char), (remaining.get(fold(char)) ?? 0) + 1);
       }
     }
+    if (poolMode) continue;
     const rhyme = game.original.rhymes.find(group => group.group === row.rhymeGroup);
     for (const [i, { char, got }] of row.cells.entries()) {
       const key = keyFor(j, i);
@@ -222,11 +335,24 @@ function feedback(game, prosody) {
 export function check(game, input, { prosody }) {
   requirePlaying(game);
   storeDraft(game, input);
-  if (game.play.mode === 'fu') {
+  const { play } = game;
+  if (play.mode === 'fu') {
     refreshFu(game, prosody, true);
   } else {
-    game.play.checks++;
-    game.play.feedback = feedback(game, prosody);
+    play.checks++;
+    play.feedback = feedback(game, prosody);
+    play.tried ??= {};
+    for (const [key, fb] of Object.entries(play.feedback)) {
+      const char = play.cells[key];
+      const entries = play.tried[key] ??= [];
+      const entry = entries.find(item => item.char === char);
+      if (entry) {
+        entry.fb = fb;
+      } else {
+        entries.push({ char, fb });
+        if (entries.length > 12) entries.shift();
+      }
+    }
   }
 }
 
@@ -238,7 +364,7 @@ export function hint(game, input) {
   switch (type) {
     case 'pattern':
       if (game.form.kind === 'free') throw conflict('自由体没有可展示的谱');
-      if (play.mode !== 'fu') play.patternHint = true;
+      if (play.mode !== 'fu' && !usesPools(play.mode)) play.patternHint = true;
       break;
     case 'char': {
       const key = keyFor(j, i);
@@ -249,7 +375,15 @@ export function hint(game, input) {
       }
       delete play.cells[key];
       delete play.feedback[key];
+      delete play.tried?.[key];
       play.hinted.push(key);
+      if (usesPools(play.mode)) {
+        const kept = filterPoolCells(game, play.cells);
+        for (const key of Object.keys(play.cells)) {
+          if (!Object.hasOwn(kept, key)) delete play.feedback[key];
+        }
+        play.cells = kept;
+      }
       break;
     }
     case 'gloss':
@@ -297,7 +431,7 @@ export function submit(game, input, { prosody, now = new Date() }) {
     play.score = calculateScore(hit, blankCount(game, play.mode), play.checks, hintCounts(game));
     report = playerReport(game, prosody);
   }
-  play.resultProsody = { ok: report.ok, issues: report.issues };
+  play.resultProsody = { ok: report.ok, complete: report.complete, issues: report.issues };
   play.submittedAt = new Date(now).toISOString();
   game.status = 'submitted';
 }
@@ -359,6 +493,7 @@ function toBoard(game, patternShown) {
         gloss: play.glossed.includes(j) ? game.glosses[j] : null,
         cells: cells.map((want, i) => ({
           kind: 'blank', char: null, input: play.cells[keyFor(j, i)] ?? null, want, fb: null,
+          tried: [],
         })),
       })),
     };
@@ -378,6 +513,7 @@ function toBoard(game, patternShown) {
             input: kind === 'blank' ? play.cells[key] ?? null : null,
             want: patternShown ? want : null,
             fb: kind === 'blank' ? play.feedback[key] ?? null : null,
+            tried: kind === 'blank' ? play.tried?.[key] ?? [] : [],
           };
         }),
       };
@@ -385,10 +521,21 @@ function toBoard(game, patternShown) {
   };
 }
 
-function toPlayView(game) {
+function toPlayProsody(game) {
+  const { play: { mode, resultProsody }, form, original } = game;
+  if (!terminal(game) || form.kind === 'free' || !resultProsody) return null;
+  const { ok, complete = null, issues } = resultProsody;
+  if (mode === 'fu') return { ok, complete, issues };
+  const visible = issues.filter(({ code, ju, pos, message }) => !original.issues.some(issue =>
+    issue.code === code && issue.ju === ju && issue.pos === pos && issue.message === message));
+  return { ok: !visible.some(issue => issue.level === 'error'), complete, issues: visible };
+}
+
+function toPlayView(game, prosody) {
   const { play } = game;
   const useFreeText = freeText(game);
-  const patternShown = !useFreeText && (play.mode === 'fu' || play.patternHint);
+  const poolMode = usesPools(play.mode);
+  const patternShown = game.form.kind !== 'free' && (poolMode || play.mode === 'fu' || play.patternHint);
   const variantLabel = play.mode === 'fu' ? play.pattern?.variantLabel : game.original.variant?.label;
   return {
     mode: play.mode,
@@ -397,6 +544,9 @@ function toPlayView(game) {
     patternShown,
     variantLabel: patternShown ? variantLabel ?? null : null,
     board: useFreeText ? null : toBoard(game, patternShown),
+    pools: poolMode ? availablePools(game).map(({ ju, tiles }) => ({
+      ju, tiles: tiles.map(char => ({ char, tones: prosody.charInfo(char, game.rhymebook.id, game.form.kind).tones })),
+    })) : null,
     ...(useFreeText ? { glosses: play.glossed.map(j => ({ j, text: game.glosses[j] })) } : {}),
     checks: play.checks,
     hints: hintCounts(game),
@@ -407,18 +557,19 @@ function toPlayView(game) {
     report: play.report,
     submittedAt: play.submittedAt,
     score: play.score,
+    prosody: toPlayProsody(game),
     review: play.review,
   };
 }
 
-export function toView(game) {
+export function toView(game, { prosody } = {}) {
   const { id, title, subjects, premise, premiseNote, form, rhymebook, story, createdAt, status } = game;
   return {
     id, title, subjects, premise, premiseNote, form, rhymebook, story, createdAt, status,
     modes: modes.map(mode => ({
       ...mode, blanks: mode.id === 'ju' ? game.hiddenLines.length : blankCount(game, mode.id),
     })),
-    play: game.play ? toPlayView(game) : null,
+    play: game.play ? toPlayView(game, prosody) : null,
     reveal: status === 'revealed' ? {
       poem: game.poem,
       ju: game.original.ju,
@@ -433,7 +584,9 @@ export function toView(game) {
 }
 
 export function toListItem({ id, title, subjects, form, status, play, createdAt }) {
-  return { id, title, subjects, form: { name: form.name }, status, mode: play?.mode ?? null, createdAt };
+  const mode = play?.mode ?? null;
+  const grades = { yuan: play?.score?.grade ?? null, pin: mode === 'ju' || mode === 'fu' ? play?.review?.grade ?? null : null };
+  return { id, title, subjects, form: { name: form.name }, status, mode, grades, createdAt };
 }
 
 function differences(game) {
@@ -453,6 +606,7 @@ function differences(game) {
 export function toResult(game) {
   const { id, title, status, form, rhymebook, play } = game;
   const reviewed = Boolean(play?.review);
+  const report = play?.resultProsody ?? play?.report;
   return {
     status, id, title, form: form.name, rhymebook: rhymebook.id,
     mode: play?.mode ?? null,
@@ -463,7 +617,7 @@ export function toResult(game) {
     score: play?.score ?? null,
     checks: play?.checks ?? 0,
     hints: play ? hintCounts(game) : { pattern: false, chars: 0, glosses: 0, imagery: [] },
-    prosody: play?.resultProsody ?? (play?.report && { ok: play.report.ok, issues: play.report.issues }) ?? null,
+    prosody: report ? { ok: report.ok, issues: report.issues } : null,
     reviewed,
     next: terminal(game) && !reviewed ? `写评点：tuiqiao review ${id} <review.json>` : null,
   };

@@ -21,19 +21,31 @@ export function charInfo(char) {
   };
 }
 
-const definitions = [['wujue', '五绝', 'shi', 5], ['qijue', '七绝', 'shi', 7], ['hps', '浣溪沙', 'ci', 5]]
-  .map(([id, name, kind, width]) => ({
-    id, name, kind, desc: '四句测试谱', common: id !== 'qijue', aliases: [],
-    variants: [0, 1].map(index => ({
-      index, label: index ? '变体一' : '正体', sketch: '测试格式', chars: 4 * width,
-      ju: Array.from({ length: 4 }, (_, j) => ({
-        tones: (index ? '仄' : '平') + '中'.repeat(width - 1),
-        end: j % 2 ? '韵' : '句', rhyme: Boolean(j % 2),
-        rhymeGroup: j % 2 ? 1 : null, rhymeTone: j % 2 ? '平' : null,
-        stanzaEnd: j === 3 || (kind === 'ci' && j === 1),
-      })),
+export function bookName(rhymebook, kind) {
+  return rhymebook === 'guyun' ? (kind === 'ci' ? '词林正韵' : '平水韵') : '中华新韵';
+}
+
+export function rhymeChars(name, rhymebook, kind, tone) {
+  const expected = rhymebook === 'xinyun' ? '十唐' : kind === 'ci' ? '第二部' : '七阳';
+  if (name !== expected || tone === '仄') return [];
+  return [{ name, tone: '平', common: '光霜', rare: '㟅𡃥' }];
+}
+
+const definitions = [
+  ['wujue', '五绝', 'shi', 5, 4, true], ['qijue', '七绝', 'shi', 7, 4, false],
+  ['hps', '浣溪沙', 'ci', 5, 4, true], ['wulv', '五律', 'shi', 5, 8, false],
+].map(([id, name, kind, width, lines, common]) => ({
+  id, name, kind, desc: '测试谱', common, aliases: [],
+  variants: [0, 1].map(index => ({
+    index, label: index ? '变体一' : '正体', sketch: '测试格式', chars: lines * width,
+    ju: Array.from({ length: lines }, (_, j) => ({
+      tones: (index ? '仄' : '平') + '中'.repeat(width - 1),
+      end: j % 2 ? '韵' : '句', rhyme: Boolean(j % 2),
+      rhymeGroup: j % 2 ? 1 : null, rhymeTone: j % 2 ? '平' : null,
+      stanzaEnd: j === lines - 1 || (kind === 'ci' && j === 1),
     })),
-  }));
+  })),
+}));
 
 const traditional = { 鶴: '鹤', 鐘: '钟', 隱: '隐', 塘: '塘' };
 export function simplify(char) {
@@ -70,7 +82,8 @@ export function splitPoem(text) {
 
 export function checkPoem({ form, rhymebook, text, ju, variant = 'auto', partial = false }) {
   const def = resolveForm(form);
-  const rows = ju?.map((text, j) => ({ text, punct: j % 2 ? '。' : '，' })) ?? splitPoem(text).ju;
+  const split = text === undefined ? null : splitPoem(text);
+  const rows = ju?.map((text, j) => ({ text, punct: j % 2 ? '。' : '，' })) ?? split.ju;
   const index = variant === 'auto' ? Number(rows[0]?.text.startsWith('雨')) : variant;
   const scheme = def?.variants[index];
   const issues = [];
@@ -81,7 +94,8 @@ export function checkPoem({ form, rhymebook, text, ju, variant = 'auto', partial
   const output = (scheme?.ju ?? rows).map((pattern, j) => {
     const { text = '', punct = j % 2 ? '。' : '，' } = rows[j] ?? {};
     const chars = Array.from(text);
-    const { end = '句', rhyme = false, rhymeGroup = null, stanzaEnd = j === rows.length - 1 } = pattern;
+    const { end = '句', rhyme = false, rhymeGroup = null,
+      stanzaEnd = j === rows.length - 1 || Boolean(split?.stanzaBreaks.includes(j + 1)) } = pattern;
     const tones = pattern.tones ?? '中'.repeat(chars.length);
     if (partial && chars.length > tones.length) {
       issues.push({ level: 'warn', code: 'length', ju: j, pos: null, message: '填字超过测试谱' });

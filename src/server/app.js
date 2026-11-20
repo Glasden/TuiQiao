@@ -2,8 +2,9 @@ import { readFileSync } from 'node:fs';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, join, sep } from 'node:path';
 import {
-  GameError, check, hint, reveal, saveDraft, setMode, submit, toListItem, toView,
+  GameError, canBrowseRhymes, check, hint, reveal, saveDraft, setMode, submit, toListItem, toView,
 } from '../game/index.js';
+import { conflict, invalid } from '../game/validation.js';
 import { GAME_ID } from '../store/index.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
@@ -41,6 +42,28 @@ function json(res, status, data) {
     'Cache-Control': 'no-store',
   });
   res.end(JSON.stringify(data));
+}
+
+function lookup(game, params, prosody) {
+  const chars = params.get('chars');
+  const rhyme = params.get('rhyme');
+  if ((chars === null) === (rhyme === null)) throw invalid('须在 chars 和 rhyme 中选一种查法');
+
+  const rhymebook = game.rhymebook.id;
+  const { kind } = game.form;
+  const book = prosody.bookName(rhymebook, kind);
+  if (chars !== null) {
+    const han = chars.match(/\p{Script=Han}/gu) ?? [];
+    if (han.length < 1 || han.length > 8) throw invalid('chars 须包含 1 到 8 个汉字');
+    return { book, chars: han.map(char => prosody.charInfo(char, rhymebook, kind)) };
+  }
+  const tone = params.get('tone') ?? undefined;
+  if (tone !== undefined && tone !== '平' && tone !== '仄') throw invalid('tone 须为平或仄');
+  if (!canBrowseRhymes(game)) throw conflict('仅自赋或交卷后可以浏览同韵字');
+  const rhymes = prosody.rhymeChars(rhyme, rhymebook, kind, tone).map(({ name, tone, common, rare }) => ({
+    name, tone, common, more: Array.from(rare).length,
+  }));
+  return { book, rhymes };
 }
 
 function readBody(req) {
@@ -110,7 +133,8 @@ async function sendStatic(res, webDir, name, asset = false) {
 export function createApp({ store, prosody, webDir, startedAt }) {
   async function route(req, res) {
     // Use the raw path so encoded dot segments are rejected before URL normalization.
-    const path = (req.url ?? '').split('?', 1)[0];
+    const url = req.url ?? '';
+    const path = url.split('?', 1)[0];
     if (req.method === 'GET' && path === '/api/meta') {
       if (startedAt) {
         res.setHeader('X-Tuiqiao-Pid', String(process.pid));
@@ -127,7 +151,7 @@ export function createApp({ store, prosody, webDir, startedAt }) {
       const [, id, action] = match;
       if (!GAME_ID.test(id)) throw notFound('对局不存在');
       let game;
-      if (req.method === 'GET' && !action) {
+      if (req.method === 'GET' && (!action || action === 'lookup')) {
         game = store.readGame(id);
       } else if (req.method === 'POST' && actions.has(action)) {
         const body = await readBody(req);
@@ -136,7 +160,11 @@ export function createApp({ store, prosody, webDir, startedAt }) {
         throw notFound();
       }
       if (!game) throw notFound('对局不存在');
-      return json(res, 200, toView(game));
+      if (action === 'lookup') {
+        const params = new URLSearchParams(url.slice(path.length + 1));
+        return json(res, 200, lookup(game, params, prosody));
+      }
+      return json(res, 200, toView(game, { prosody }));
     }
 
     if (req.method === 'GET') {

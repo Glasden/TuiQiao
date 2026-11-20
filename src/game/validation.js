@@ -63,10 +63,11 @@ function layoutFor(poem, split, report) {
   const hanCount = text => Array.from(text.matchAll(/\p{Script=Han}/gu)).length;
   const aligned = report.ju.reduce((sum, row) => sum + hanCount(row.text), 0) === offsets.length;
   let cursor = 0;
-  return report.ju.map((row, j) => {
+  const lineCount = aligned ? report.ju.length : Math.max(report.ju.length, split.ju.length);
+  return Array.from({ length: lineCount }, (_, j) => {
     // For a complete text, the core may cut an unpunctuated line at several
     // metrical boundaries. On length errors, keep the source row positions.
-    const source = aligned ? row : split.ju[j];
+    const source = aligned ? report.ju[j] : split.ju[j];
     const length = source ? hanCount(source.text) : 0;
     const line = {
       offsets: offsets.slice(cursor, cursor + length),
@@ -77,10 +78,14 @@ function layoutFor(poem, split, report) {
   });
 }
 
+export function seedRank(key) {
+  return createHash('sha256').update(key).digest().readUInt32BE();
+}
+
 function chooseBlanks(layout, id) {
   const ranked = layout.map(({ offsets }, j) => offsets.map((_, i) => {
     const key = `${j}.${i}`;
-    return { key, rank: createHash('sha256').update(`${id}/${key}`).digest().readUInt32BE() };
+    return { key, rank: seedRank(`${id}/${key}`) };
   }).sort((a, b) => a.rank - b.rank));
   const first = ranked.flatMap(row => row.slice(0, 1));
   const rest = ranked.flatMap(row => row.slice(1)).sort((a, b) => a.rank - b.rank);
@@ -104,7 +109,7 @@ export function createGame(input, { prosody, id, now = new Date(), allowFlaws = 
   }
   const rhymebook = prosody.RHYMEBOOKS.find(book => book.id === input.rhymebook);
   if (!rhymebook) errors.push('rhymebook 须为 xinyun 或 guyun');
-  for (const key of ['premiseNote', 'note', 'cloze']) {
+  for (const key of ['premiseNote', 'note', 'cloze', 'decoys']) {
     if (Object.hasOwn(input, key) && typeof input[key] !== 'string') {
       errors.push(`${key} 须为文本`);
     }
@@ -163,6 +168,7 @@ export function createGame(input, { prosody, id, now = new Date(), allowFlaws = 
     original: report,
     layout,
     cloze: cloze ?? chooseBlanks(layout, id),
+    decoys: [...new Set(input.decoys?.match(/\p{Script=Han}/gu))].slice(0, 12),
     hiddenLines: hiddenLines ?? layout.flatMap((_, j) => j % 2 ? [j] : []),
     glosses: input.glosses ?? null,
     imagery: input.imagery ?? [],

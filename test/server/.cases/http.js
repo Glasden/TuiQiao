@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -66,8 +66,9 @@ test('HTTP 实现全部 API 路由，并在 CLI 写入后重新从磁盘读取',
   const list = await response(get('/api/games'));
   assert.deepEqual(list.games.map(game => game.id), [recent.id, id]);
   assert.deepEqual(Object.keys(list.games[0]).sort(),
-    ['createdAt', 'form', 'id', 'mode', 'status', 'subjects', 'title']);
+    ['createdAt', 'form', 'grades', 'id', 'mode', 'status', 'subjects', 'title']);
   assert.deepEqual(list.games[0].form, { name: input.form });
+  assert.deepEqual(list.games[0].grades, { yuan: null, pin: null });
 
   assert.equal((await response(get(base))).status, 'new');
   await response(post(`${base}/reveal`), 409);
@@ -98,7 +99,7 @@ test('HTTP 实现全部 API 路由，并在 CLI 写入后重新从磁盘读取',
   await response(post(`${base}/draft`, { cells: {} }), 409);
 
   await Promise.all([
-    store.updateGame(id, game => setReview(game, { comment: '从别处写入的评点' })),
+    store.updateGame(id, game => setReview(game, { comment: '从别处写入的评点', grade: '上中' })),
     response(post(`${base}/reveal`)),
   ]);
   const result = await response(get(base + '?fresh=yes'));
@@ -106,6 +107,8 @@ test('HTTP 实现全部 API 路由，并在 CLI 写入后重新从磁盘读取',
   assert.equal(result.play.review.comment, '从别处写入的评点');
   assert.equal(result.reveal.poem, input.poem);
   assert.equal((await response(post(`${base}/reveal`))).status, 'revealed');
+  const after = (await response(get('/api/games'))).games.find(game => game.id === id);
+  assert.deepEqual(after.grades, { yuan: submitted.play.score.grade, pin: null });
 
   assert.equal(store.readGame('../invalid'), null);
   const files = await readdir(join(store.home, 'games'));
@@ -113,6 +116,83 @@ test('HTTP 实现全部 API 路由，并在 CLI 写入后重新从磁盘读取',
   const stored = JSON.parse(await readFile(join(store.home, 'games', `${id}.json`), 'utf8'));
   assert.equal(stored.play.review.comment, '从别处写入的评点');
   assert.equal(stored.original.ju.length, 4);
+});
+
+test('HTTP 查韵校验参数、使用对局韵表并限制交卷前浏览同韵字', async t => {
+  const { store, build, get, post } = await fixture(t);
+  const { id } = await build({ ...input, rhymebook: 'guyun' }, '2020-01-01');
+  const base = `/api/games/${id}`;
+  async function lookup(id, query, status = 200) {
+    const path = join(store.home, 'games', `${id}.json`);
+    const before = await readFile(path);
+    const beforeStat = await stat(path);
+    const result = await response(get(`/api/games/${id}/lookup?${new URLSearchParams(query)}`), status);
+    assert.deepEqual(await readFile(path), before);
+    assert.equal((await stat(path)).ino, beforeStat.ino);
+    return result;
+  }
+  const chars = { book: '平水韵', chars: [...'白月𠮷'].map(prosody.charInfo) };
+  assert.deepEqual(await lookup(id, { chars: '白A，月 𠮷' }), chars);
+  assert.equal((await lookup(id, { chars: '白'.repeat(8) })).chars.length, 8);
+  const rhyme = { rhyme: '七阳', tone: '平' };
+  for (const query of [{}, { ...rhyme, chars: '白' }, { chars: 'A，' }, { chars: '白'.repeat(9) }]) {
+    assert.equal((await lookup(id, query, 400)).error.code, 'invalid-input');
+  }
+  assert.equal((await lookup(id, rhyme, 409)).error.code, 'conflict');
+  await response(get('/api/games/999999/lookup?chars=白'), 404);
+  const expected = { book: '平水韵', rhymes: [{ name: '七阳', tone: '平', common: '光霜', more: 2 }] };
+  for (const mode of ['ze', 'bian', 'chai', 'zi', 'ju', 'fu']) {
+    const game = mode === 'zi' ? { id } : await build({
+      ...input, rhymebook: 'guyun', form: mode === 'fu' ? '浣溪沙' : input.form,
+    }, '2020-01-01');
+    const path = mode === 'zi' ? base : `/api/games/${game.id}`;
+    await response(post(`${path}/mode`, { mode }));
+    if (mode === 'fu') {
+      assert.deepEqual(await lookup(game.id, { rhyme: '第二部' }), {
+        book: '词林正韵', rhymes: [{ name: '第二部', tone: '平', common: '光霜', more: 2 }],
+      });
+    } else {
+      await lookup(game.id, rhyme, 409);
+      assert.deepEqual(await lookup(game.id, { chars: '白月𠮷' }), chars);
+    }
+    const submitted = await response(post(`${path}/submit`, { cells: {} }));
+    if (mode !== 'fu') assert.deepEqual(await lookup(game.id, rhyme), expected);
+    if (mode === 'zi') {
+      assert.deepEqual(await lookup(game.id, { rhyme: '无此韵' }), { book: '平水韵', rhymes: [] });
+      assert.deepEqual(await lookup(game.id, { ...rhyme, tone: '仄' }), { book: '平水韵', rhymes: [] });
+      assert.equal((await lookup(game.id, { ...rhyme, tone: '入' }, 400)).error.code, 'invalid-input');
+      await response(post(`${path}/reveal`));
+      assert.deepEqual(await lookup(game.id, rhyme), expected);
+    }
+    await store.updateGame(game.id, current => setReview(current, { comment: '评点', grade: '上中' }));
+    const listed = (await response(get('/api/games'))).games.find(item => item.id === game.id);
+    assert.deepEqual(listed.grades, {
+      yuan: submitted.play.score?.grade ?? null, pin: mode === 'ju' || mode === 'fu' ? '上中' : null,
+    });
+  }
+});
+
+test('HTTP 从磁盘读写选字盘、试字、揭字与对局得分', async t => {
+  const { store, build, get, post } = await fixture(t);
+  const { id } = await build({ ...input, decoys: '鶴堂甲乙' }, '2020-01-01');
+  const base = `/api/games/${id}`;
+  const initial = await response(post(`${base}/mode`, { mode: 'bian' }));
+  await response(post(`${base}/mode`, { mode: 'chai' }), 409);
+  const [pool] = initial.play.pools;
+  assert.deepEqual(pool.ju, [0, 1, 2, 3]);
+  assert.deepEqual(pool.tiles.map(({ char }) => char).sort(), [...'玄鹤光钟夜堂甲乙'].sort());
+  assert.deepEqual(pool.tiles.find(({ char }) => char === '堂'), { char: '堂', tones: ['平'] });
+  assert.deepEqual((await response(get(base))).play.pools, initial.play.pools);
+  await response(post(`${base}/check`, { cells: { '0.0': '玄' } }));
+  const tried = await response(post(`${base}/check`, { cells: { '1.4': '堂', '2.3': '光' } }));
+  assert.equal(tried.play.board.ju[1].cells[4].fb, 'miss');
+  const hinted = await response(post(`${base}/hint`, { type: 'char', j: 1, i: 4 }));
+  assert.deepEqual(hinted.play.pools[0].tiles, pool.tiles.filter(({ char }) => char !== '光'));
+  assert.equal(hinted.play.board.ju[2].cells[3].input, null);
+  assert.equal(hinted.play.board.ju[2].cells[3].fb, null);
+  assert.deepEqual(store.readGame(id).play.pools, [{ ju: pool.ju, tiles: pool.tiles.map(({ char }) => char) }]);
+  const submitted = await response(post(`${base}/submit`, { cells: { '0.0': '玄', '2.3': '钟' } }));
+  assert.deepEqual(submitted.play.score, { hit: 2, total: 5, points: 31, grade: '下中' });
 });
 
 test('HTTP 拒绝无效 JSON、过大请求、未知路径、目录穿越和越界符号链接', async t => {

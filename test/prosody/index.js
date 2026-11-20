@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
-  charInfo, checkPoem, listForms, resolveForm, RHYMEBOOKS, sampleForms, splitPoem,
+  bookName, charInfo, checkPoem, listForms, listRhymes, resolveForm, rhymeChars, RHYMEBOOKS, sampleForms, splitPoem,
 } from '../../src/prosody/index.js';
 
 // 名作
@@ -269,6 +270,49 @@ test('韵书按古入声、新平声和多音字区分读音', () => {
   assert.deepEqual(charInfo('眚', 'guyun', 'ci').readings.map(({ sheng, rhyme }) => [sheng, rhyme]),
     [['上', '第十一部'], ['去', '第十一部']]);
   assert.deepEqual(charInfo('菑', 'guyun', 'ci').readings.map(({ rhyme }) => rhyme), ['第三部', '第五部']);
+});
+
+test('反查三张韵表，按韵部与平仄合并并依韵书次序列出', () => {
+  assert.equal(bookName('xinyun', 'ci'), '中华新韵');
+  assert.equal(bookName('guyun', 'free'), '平水韵');
+  assert.equal(bookName('guyun', 'ci'), '词林正韵');
+
+  const pingshui = listRhymes('guyun');
+  assert.equal(pingshui.length, 106);
+  assert.deepEqual(pingshui.slice(30, 34).map(({ name }) => name), ['一董', '二肿', '三讲', '四纸']);
+  assert.deepEqual(pingshui.filter(({ name }) => name === '七阳'),
+    [{ name: '七阳', tone: '平', sheng: ['平'], chars: 273, common: 145 }]);
+  const yang = rhymeChars('七阳', 'guyun', 'free');
+  assert.equal(yang.length, 1);
+  assert.equal(yang[0].tone, '平');
+  assert.ok(yang[0].common.includes('阳'));
+  assert.deepEqual(rhymeChars('七阳', 'guyun', 'shi', '仄'), []);
+  assert.deepEqual(rhymeChars('无此韵', 'guyun'), []);
+  // 入声韵带不带「入声」前缀都查得到
+  assert.deepEqual(rhymeChars('十一陌', 'guyun'), rhymeChars('入声十一陌', 'guyun'));
+  assert.ok(rhymeChars('十一陌', 'guyun')[0].common.includes('白'));
+
+  const xinyun = listRhymes('xinyun');
+  assert.equal(xinyun.length, 28);
+  assert.deepEqual(xinyun.filter(({ name }) => name === '八寒').map(({ tone, sheng }) => [tone, sheng]),
+    [['平', ['阴平', '阳平']], ['仄', ['上', '去']]]);
+  const cilin = listRhymes('guyun', 'ci');
+  assert.equal(cilin.length, 33);
+  assert.deepEqual(cilin.slice(-5).map(({ tone, sheng }) => [tone, sheng]), Array(5).fill(['仄', ['入']]));
+  assert.deepEqual(rhymeChars('第十七部', 'guyun', 'ci').map(({ tone }) => tone), ['仄']);
+});
+
+test('同韵字去重，一级字按字表次序，繁体和僻字按码位归入 rare', () => {
+  const table = JSON.parse(readFileSync(new URL('../../data/common.json', import.meta.url), 'utf8'));
+  assert.equal(new Set(table).size, 3755);
+  assert.ok(table.includes('乾'));
+  const [{ common, rare }, oblique] = rhymeChars('八寒', 'xinyun');
+  assert.equal(oblique.tone, '仄');
+  assert.ok(common.includes('干'));
+  assert.ok(!common.includes('乾'));
+  assert.equal([...rare].filter(char => char === '乾').length, 1);
+  assert.equal(common, [...table].filter(char => common.includes(char)).join(''));
+  assert.deepEqual([...rare], [...new Set(rare)].sort((a, b) => a.codePointAt(0) - b.codePointAt(0)));
 });
 
 test('古韵补字含三讲、上去多读和入声，词林沿用原表归部', () => {

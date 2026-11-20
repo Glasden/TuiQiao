@@ -220,15 +220,24 @@ function simplifications() {
   return byChar;
 }
 
-try {
+function commonChars() {
+  const bytes = [];
+  for (let row = 0xb0; row <= 0xd7; row++) {
+    for (let col = 0xa1; col <= (row === 0xd7 ? 0xf9 : 0xfe); col++) bytes.push(row, col);
+  }
+  return new TextDecoder('gb2312', { fatal: true }).decode(Uint8Array.from(bytes));
+}
+
+function buildDatasets() {
   const pingshui = pingshuiBook();
-  const datasets = {
-    xinyun: modernBook(),
-    pingshui,
-    cilin: cilinBook(pingshui),
-    tunes: ciTunes(),
-    simplified: simplifications(),
+  return {
+    xinyun: modernBook(), pingshui, cilin: cilinBook(pingshui),
+    tunes: ciTunes(), simplified: simplifications(), common: commonChars(),
   };
+}
+
+try {
+  const datasets = process.argv.includes('--common') ? { common: commonChars() } : buildDatasets();
   mkdirSync(new URL('data/', root), { recursive: true });
   for (const [name, data] of Object.entries(datasets)) {
     writeFileSync(new URL(`data/${name}.json`, root), JSON.stringify(data) + '\n');

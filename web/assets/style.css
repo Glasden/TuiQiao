@@ -108,6 +108,15 @@ button { font: inherit; color: inherit; }
 .qian b { writing-mode: vertical-rl; font: 400 30px/1.2 var(--kai); letter-spacing: .35em; }
 .qian span { writing-mode: vertical-rl; font: 14px/1.7 var(--kai); color: var(--ink-2); letter-spacing: .12em; max-height: 250px; }
 .qian em { position: absolute; left: 10px; bottom: 10px; font: normal 12px var(--kai); color: var(--zhu); writing-mode: vertical-rl; letter-spacing: .1em; }
+/* 两大档各一匣：选字在右，落笔在左 */
+.dang-row { display: flex; flex-direction: row-reverse; justify-content: center; align-items: flex-start; gap: clamp(22px, 4.5vw, 46px); }
+.dang { display: flex; flex-direction: column; align-items: center; }
+.dang h3 { margin: 0 0 16px; font: 400 17px/1.4 var(--kai); letter-spacing: .5em; text-indent: .5em; color: var(--zhu); text-align: center; }
+.dang h3 small { display: block; margin-top: 2px; font-size: 13px; letter-spacing: .14em; text-indent: .14em; color: var(--ink-3); }
+.dang .qian-row { gap: 14px; }
+.dang .qian { padding: 20px 12px 18px; min-height: 276px; gap: 10px; }
+.dang .qian b { font-size: 27px; }
+.dang .qian em { font-size: 13px; left: 9px; bottom: 9px; }
 .ze .zhu-note { text-align: center; margin-top: 26px; font: 14px var(--kai); color: var(--ink-3); letter-spacing: .1em; }
 
 /* ── 诗笺 ───────────────────────────── */
@@ -151,6 +160,23 @@ button { font: inherit; color: inherit; }
   width: 84%; height: 84%; padding: 0; margin: 0; text-align: center; font: inherit; color: var(--dai);
   background: rgba(255,255,255,.25); border: 1px solid var(--ink-3); border-radius: 0; appearance: none; caret-color: var(--zhu);
 }
+/* 选字档的格：一方空位，字从盘里来 */
+.cell button.ch {
+  width: 84%; height: 84%; padding: 0; margin: 0; font: inherit; line-height: 1; color: var(--dai); cursor: pointer;
+  background: rgba(255,255,255,.25); border: 1px solid var(--ink-3); border-radius: 0; appearance: none;
+  user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.cell button.ch:not(:empty):not(:disabled) { cursor: grab; touch-action: none; }
+.cell button.ch:focus-visible { outline: none; border-color: var(--zhu); box-shadow: 0 0 0 3px rgba(165,55,43,.13); background: rgba(255,255,255,.6); }
+.cell button.ch:disabled { border-color: transparent; background: transparent; color: var(--dai); cursor: default; }
+.cell.empty button.ch:disabled { border: 1px solid var(--rule); }
+.cell.fb-hit button.ch { border-color: transparent; background: transparent; }
+.cell.fb-miss button.ch { color: var(--ink-3); }
+.cell.warn button.ch { text-decoration: underline dotted var(--zhe) 1.5px; text-underline-offset: 3px; }
+.cell.cur button.ch { border-color: var(--zhu); background: rgba(255,255,255,.5); }
+.cell.cur.empty button.ch { box-shadow: 0 0 0 3px rgba(165,55,43,.13); }
+.cell.dao button.ch { border-color: var(--zhu); border-style: dashed; background: rgba(165,55,43,.1); box-shadow: 0 0 0 3px rgba(165,55,43,.16); }
+.cell button.ch.tuo { opacity: .28; }
 .cell input.ch:focus { outline: none; border-color: var(--zhu); box-shadow: 0 0 0 3px rgba(165,55,43,.13); background: rgba(255,255,255,.6); }
 .cell input.ch:disabled { border-color: transparent; background: transparent; color: var(--dai); opacity: 1; -webkit-text-fill-color: var(--dai); }
 .cell.empty input.ch:disabled { border: 1px solid var(--rule); }
@@ -192,7 +218,56 @@ button { font: inherit; color: inherit; }
 
 .col .jiao { height: 30px; display: flex; flex-direction: column; align-items: center; font: 13px/1.1 var(--kai); color: var(--ink-3); }
 .col .jiao b { font-weight: 400; color: var(--zhu); font-size: 12px; }
+.col.zai { background: linear-gradient(rgba(47,75,99,.055), rgba(47,75,99,.055)); }
 .col.cur-col { background: linear-gradient(rgba(165,55,43,.05), rgba(165,55,43,.05)); }
+
+/* ── 字盘：一匣活字 ─────────────────── */
+.pan {
+  margin: 18px auto 0; width: fit-content; max-width: min(100%, 620px); min-width: min(100%, 300px); padding: 12px 16px 12px;
+  border: 1px solid var(--ink-3); outline: 1px solid var(--rule); outline-offset: 3px; background: rgba(233,222,197,.5);
+  transition: border-color .15s, background .15s;
+}
+.pan.dao { border-color: var(--zhu); background: rgba(165,55,43,.06); }
+.pan h3 { margin: 0; text-align: center; font: 400 15px var(--kai); color: var(--zhu); letter-spacing: .4em; text-indent: .4em; }
+.pan h3 small { margin-left: .4em; font-size: 13px; color: var(--ink-3); letter-spacing: .15em; }
+.pan-ye { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 4px; margin-top: 2px; }
+.pan-ye .btn { padding: 0 8px; font-size: 14px; }
+.pan-ye .btn.man:not(.on) { color: var(--ink-3); }
+.pan-zi {
+  --zi: clamp(33px, 9.3vw, 46px); --gap: 9px;
+  display: flex; flex-wrap: wrap; justify-content: center; gap: var(--gap); margin: 10px auto 0;
+  max-width: calc(var(--k, 10) * (var(--zi) + var(--gap)) - var(--gap) + 1px);
+}
+.zi {
+  position: relative; flex: none; display: grid; place-items: center; width: var(--zi, 46px); height: var(--zi, 46px); padding: 0;
+  font: calc(var(--zi, 46px) * .62)/1 var(--kai); color: var(--ink); cursor: grab; touch-action: none;
+  background: var(--paper-hi); border: 1px solid var(--ink); border-radius: 0; box-shadow: 2px 2px 0 var(--rule);
+  user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; transition: transform .12s, box-shadow .12s;
+}
+button.zi:hover { transform: translate(-1px, -2px); box-shadow: 3px 4px 0 var(--rule); }
+button.zi:focus-visible { outline: 2px solid var(--zhu); outline-offset: 2px; }
+.zi .pu { position: absolute; left: 3px; top: 3px; margin: 0; width: 6px; height: 6px; border-radius: 50%; border: 1px solid var(--ink-2); opacity: .8; }
+.zi .pu.ze { background: var(--ink-2); }
+.zi .pu.zhong { background: linear-gradient(90deg, var(--ink-2) 50%, transparent 50%); }
+.zi.kong { border: 1px dashed var(--rule); background: none; box-shadow: none; cursor: default; }
+.zi.tuo { opacity: .28; }
+.zi.fei { /* 拖在手里的那一枚 */
+  position: fixed; z-index: 20; margin: 0; pointer-events: none; cursor: grabbing;
+  transform: translate(-50%, -78%) rotate(-5deg) scale(1.14); box-shadow: 0 12px 20px -10px rgba(60,40,10,.75); transition: none;
+}
+.pan-note { margin: 10px 0 0; text-align: center; font: 13px/1.7 var(--kai); color: var(--ink-3); letter-spacing: .06em; }
+
+/* 曾试：当前格试过的字，淡墨一行；留出行高，换格时版面不跳 */
+.ceng {
+  min-height: 1.9em; margin-top: 12px; display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 0 16px;
+  font: 14px/1.9 var(--kai); color: var(--ink-3); letter-spacing: .08em;
+}
+.ceng b { font-weight: 400; letter-spacing: .2em; }
+.ceng .shi { cursor: pointer; padding: 0; border: 0; background: none; font: inherit; color: inherit; letter-spacing: inherit; }
+.ceng .shi i { font-style: normal; font-size: 18px; color: var(--ink-2); margin-right: .3em; }
+.ceng .shi.fb-hit i { color: var(--zhu); }
+.ceng .shi:hover, .ceng .shi:hover i { color: var(--zhu); }
+.ceng .shi:focus-visible { outline: 1px solid var(--zhu); outline-offset: 3px; }
 
 .jian-cap { text-align: center; font: 14px var(--kai); color: var(--ink-2); letter-spacing: .3em; margin-bottom: 10px; }
 
@@ -218,6 +293,8 @@ button { font: inherit; color: inherit; }
 .btn.qing { border-color: transparent; color: var(--ink-2); letter-spacing: .12em; text-indent: 0; min-width: 0; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 5px; }
 .btn.qing:hover:not(:disabled) { background: transparent; color: var(--zhu); }
 .an .sep { width: 1px; height: 22px; background: var(--rule); margin: 0 6px; }
+.an .gai { font: 14px var(--kai); color: var(--ink-3); letter-spacing: .2em; }
+.an .gai ~ .btn.qing { padding-left: 6px; padding-right: 6px; }
 
 .zhuji { margin-top: 14px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px 18px; font: 14px/1.8 var(--kai); color: var(--ink-2); letter-spacing: .08em; }
 .zhuji .li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -243,6 +320,35 @@ button { font: inherit; color: inherit; }
 .pang li[data-j]:hover { color: var(--zhu); }
 .pang .xiang { display: flex; flex-wrap: wrap; gap: 8px; }
 
+.btn.qing.on { color: var(--zhu); text-decoration-color: var(--zhu-soft); }
+
+/* ── 查韵：案头的一册韵书 ───────────── */
+.yun { margin: 20px auto 0; max-width: 620px; padding: 16px 22px 18px; border: 1px solid var(--rule); background: rgba(255,255,255,.22); }
+.yun h3 { margin: 0 0 10px; font: 400 15px var(--kai); color: var(--zhu); letter-spacing: .4em; }
+.yun h3 small { margin-left: .6em; font-size: 13px; color: var(--ink-3); letter-spacing: .15em; }
+.yun-wen { display: flex; gap: 10px; align-items: stretch; }
+.yun-q {
+  flex: 1; min-width: 0; padding: 3px 12px; font: 20px/1.6 var(--kai); letter-spacing: .3em; color: var(--dai);
+  background: rgba(255,255,255,.4); border: 1px solid var(--ink-3); border-radius: 0; caret-color: var(--zhu);
+}
+.yun-q::placeholder { font-size: 15px; letter-spacing: .1em; color: var(--ink-3); }
+.yun-q:focus { outline: none; border-color: var(--zhu); box-shadow: 0 0 0 3px rgba(165,55,43,.13); }
+.yun-note { margin: 8px 0 0; font: 13px/1.8 var(--kai); color: var(--ink-3); letter-spacing: .08em; }
+.yun-note.err { color: var(--zhu); }
+.yun-out ul { list-style: none; margin: 10px 0 0; padding: 0; }
+.yun-out li { display: grid; grid-template-columns: 2.2em 1fr; align-items: baseline; padding: 3px 0; border-bottom: 1px dashed var(--rule); font: 16px/1.9 var(--kai); }
+.yun-out li b { font: 400 22px/1.5 var(--kai); color: var(--dai); }
+.yun-out .du { display: inline-block; margin-right: 1.5em; white-space: nowrap; }
+.yun-out .du em { font-style: normal; color: var(--zhu); margin-right: .6em; }
+.yun-out .du small { margin-left: .7em; font: 13px var(--song); color: var(--ink-3); }
+.yun-out .du.wei { color: var(--ink-3); white-space: normal; }
+.yun-bu { cursor: pointer; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-decoration: underline; text-decoration-color: var(--zhu-soft); text-underline-offset: 5px; }
+.yun-bu:hover, .yun-bu:focus-visible { color: var(--zhu); outline: none; }
+.yun-zi { margin-top: 14px; }
+.yun-zi h4 { margin: 0 0 2px; font: 400 15px var(--kai); color: var(--ink-2); letter-spacing: .2em; }
+.yun-zi h4 small { margin-left: 1em; font-size: 13px; color: var(--ink-3); letter-spacing: .08em; }
+.yun-zi p { margin: 0; max-height: 15.2em; overflow-y: auto; font: 19px/1.9 var(--kai); letter-spacing: .32em; word-break: break-all; }
+
 /* ── 印 ─────────────────────────────── */
 .yin {
   display: inline-grid; place-items: center; flex: none; width: 74px; height: 74px; padding: 4px;
@@ -250,12 +356,16 @@ button { font: inherit; color: inherit; }
   writing-mode: vertical-rl; filter: url(#yin); user-select: none;
 }
 .yin.kong { color: var(--zhu); background: transparent; border: 3px solid var(--zhu); }
+.yin.xiao { width: 38px; height: 38px; padding: 3px; font-size: 15px; line-height: 1.05; }
 .yin.luo { animation: luo .5s cubic-bezier(.2, .9, .3, 1.2) both; transform: rotate(-3deg); }
 @keyframes luo { from { transform: rotate(-9deg) scale(1.9); opacity: 0; } to { transform: rotate(-3deg) scale(1); opacity: .96; } }
 
 /* ── 交卷之后 ───────────────────────── */
 .juan { margin-top: 40px; }
-.pin { display: flex; align-items: center; justify-content: center; gap: 26px; }
+.pin { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 18px 26px; }
+.pin-yin { margin: 0; display: grid; justify-items: center; gap: 9px; }
+.pin-yin figcaption { font: 13px/1 var(--kai); color: var(--ink-3); letter-spacing: .4em; text-indent: .4em; }
+.pin-note { margin: 14px 0 0; text-align: center; font: 13px/1.8 var(--kai); color: var(--ink-3); letter-spacing: .08em; }
 .pin dl { margin: 0; display: grid; grid-template-columns: auto auto; gap: 0 16px; font: 16px/1.9 var(--kai); }
 .pin dt { color: var(--ink-3); letter-spacing: .3em; }
 .pin dd { margin: 0; }
@@ -284,14 +394,15 @@ button { font: inherit; color: inherit; }
 /* ── 卷帙 ───────────────────────────── */
 .mu { list-style: none; margin: 0; padding: 0; }
 .mu li { border-bottom: 1px dashed var(--rule); }
-.mu a { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 18px; align-items: baseline; padding: 14px 6px; text-decoration: none; }
+.mu a { display: grid; grid-template-columns: 38px 1fr auto auto; gap: 6px 18px; align-items: baseline; padding: 14px 6px; text-decoration: none; }
+.mu .p { grid-row: 1 / span 2; grid-column: 1; align-self: center; height: 38px; }
 .mu a:hover { background: rgba(255,255,255,.3); }
 .mu a:hover .t { color: var(--zhu); }
-.mu .t { font: 22px var(--kai); letter-spacing: .14em; }
+.mu .t { grid-row: 1; grid-column: 2; font: 22px var(--kai); letter-spacing: .14em; }
 .mu .t small { font-size: 14px; color: var(--ink-2); margin-left: 1em; letter-spacing: .1em; }
-.mu .s { font: 14px var(--kai); color: var(--ink-2); grid-column: 1; }
-.mu .d { font: 13px var(--song); color: var(--ink-3); grid-row: 1; grid-column: 3; }
-.mu .z { grid-row: 1; grid-column: 2; }
+.mu .s { font: 14px var(--kai); color: var(--ink-2); grid-row: 2; grid-column: 2 / -1; }
+.mu .d { font: 13px var(--song); color: var(--ink-3); grid-row: 1; grid-column: 4; }
+.mu .z { grid-row: 1; grid-column: 3; }
 .kong-ye { text-align: center; padding: 30px 0 20px; font: 18px/2.2 var(--kai); color: var(--ink-2); }
 .kong-ye q { quotes: "「" "」"; color: var(--zhu); }
 
@@ -310,14 +421,42 @@ button { font: inherit; color: inherit; }
   .qian { padding: 16px 10px; min-height: 262px; gap: 8px; }
   .qian b { font-size: 25px; }
   .qian span { font-size: 13px; max-height: 232px; }
+  .dang .qian-row { gap: 10px; }
+  .dang .qian { padding: 14px 8px 14px; min-height: 258px; gap: 7px; }
+  .dang .qian b { font-size: 23px; }
+  .dang .qian span { max-height: 222px; }
+  .pan { padding: 10px 10px 10px; }
+  .pan-zi { --gap: 7px; }
   .col { padding: 8px 4px 2px 10px; }
   .ques.heng.die { flex-direction: column; }
   .ques.heng.die .que + .que { border-right: 0; border-top: 1px solid var(--zhu-soft); }
   .jian { padding: 7px; --cell: clamp(26px, calc((100vw - 106px) / var(--nm, 8) - 14px), 46px); }
   .jian-pair .jian { --cell: clamp(26px, calc((100vw - 106px) / var(--nm, 8) - 14px), 46px); }
   .jian .xin { padding: 10px 3px; font-size: 13px; }
-  .pin { gap: 16px; }
+  .pin { gap: 14px 16px; }
+  .mu a { grid-template-columns: 34px 1fr auto auto; column-gap: 10px; }
+  .yun { padding: 14px 14px 16px; }
   .btn { min-width: 64px; padding: 4px 12px 5px; }
   .pi { padding: 18px 16px 16px; font-size: 17px; }
 }
+@media (max-width: 760px) {
+  .dang-row { flex-direction: column; align-items: center; gap: 30px; }
+}
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ── 付印：存成 PDF 或打出来留念 ────── */
+@media print {
+  @page { margin: 14mm 12mm; }
+  /* 印章、朱批、笺纸都靠底色，须照原样印 */
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { min-height: 0; background: none; font-size: 12pt; }
+  body::before, .mei nav, .an, .ze, .ceng, .yun, .pan, .hou, .ci, .toast { display: none !important; }
+  .mei { max-width: none; padding: 0 0 4mm; }
+  .ye { width: auto; max-width: none; margin: 0; box-shadow: none; }
+  .jian { --cell: clamp(26px, calc(150mm / var(--n, 8) - 17px), 46px); }
+  .jian, .jian-pair, .pin, .pi, .pi blockquote, .pang li, .mu li { break-inside: avoid; }
+  .yuwei, .jian-cap, .pang h3 { break-after: avoid; }
+  .pi { margin-bottom: 8mm; }
+  * { animation: none !important; transition: none !important; }
+  a { text-decoration: none; }
+}

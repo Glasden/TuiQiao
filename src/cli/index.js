@@ -14,6 +14,10 @@ const usage = `推敲 · 诗词小游戏
   form <名称> [--json]                                   查看体裁的全部谱式
   check --form <名称> --rhymebook <id> [--variant N] [文件|-] [--json]
                                                          校验诗词，省略文件时读标准输入
+  char <字…> [--rhymebook xinyun|guyun] [--kind shi|ci] [--json]
+                                                         查字的平仄、声与韵部
+  rhymes [韵部] --rhymebook <id> [--kind shi|ci] [--tone 平|仄] [--all] [--json]
+                                                         列出韵部或同韵字
   create <game.json> [--allow-flaws] [--rm] [--no-start]  校验并创建对局
   wait <id> [--timeout 秒]                               等待玩家交卷，默认 540 秒
   result <id>                                            查询当前结果
@@ -33,6 +37,8 @@ const commands = new Map(Object.entries({
   forms: { min: 0, max: 0, flags: { sample: 'value', kind: 'value', all: 'bool', json: 'bool' } },
   form: { min: 1, max: 1, flags: { json: 'bool' } },
   check: { min: 0, max: 1, flags: { form: 'value', rhymebook: 'value', variant: 'value', json: 'bool' } },
+  char: { min: 1, max: 1, flags: { rhymebook: 'value', kind: 'value', json: 'bool' } },
+  rhymes: { min: 0, max: 1, flags: { rhymebook: 'value', kind: 'value', tone: 'value', all: 'bool', json: 'bool' } },
   create: { min: 1, max: 1, flags: { 'allow-flaws': 'bool', rm: 'bool', 'no-start': 'bool' } },
   wait: { min: 1, max: 1, flags: { timeout: 'value' } },
   result: { min: 1, max: 1 },
@@ -161,6 +167,24 @@ function formatForm(form) {
   return lines.join('\n');
 }
 
+function validateRhymeOptions({ rhymebook, kind }) {
+  if (rhymebook && !['xinyun', 'guyun'].includes(rhymebook)) {
+    throw new UsageError('--rhymebook 须为 xinyun 或 guyun');
+  }
+  if (kind && !['shi', 'ci'].includes(kind)) throw new UsageError('--kind 须为 shi 或 ci');
+}
+
+const charTables = [
+  { key: 'xinyun', label: '新韵', rhymebook: 'xinyun' },
+  { key: 'pingshui', label: '平水', rhymebook: 'guyun', kind: 'shi' },
+  { key: 'cilin', label: '词林', rhymebook: 'guyun', kind: 'ci' },
+];
+
+function formatReadings({ known, readings }) {
+  if (!known) return '未收';
+  return readings.map(({ sheng, rhyme, tone }) => `${sheng}·${rhyme.replace(/^入声/u, '')}（${tone}）`).join('/');
+}
+
 async function formsOf(flags, loadProsody) {
   const kind = flags.kind;
   if (kind && !['shi', 'ci'].includes(kind)) throw new UsageError('--kind 须为 shi 或 ci');
@@ -224,9 +248,7 @@ export async function runCli([command, ...args], { loadProsody, bin }) {
       }
       case 'check': {
         if (!flags.form || !flags.rhymebook) throw new UsageError('check 须指定 --form 和 --rhymebook');
-        if (!['xinyun', 'guyun'].includes(flags.rhymebook)) {
-          throw new UsageError('--rhymebook 须为 xinyun 或 guyun');
-        }
+        validateRhymeOptions(flags);
         const variant = flags.variant === undefined ? 'auto' : integer(flags.variant, '--variant', 0);
         const prosody = await loadProsody();
         if (variant !== 'auto' && !prosody.resolveForm(flags.form)?.variants.some(v => v.index === variant)) {
@@ -239,6 +261,55 @@ export async function runCli([command, ...args], { loadProsody, bin }) {
         if (flags.json) show(report);
         else console.log(formatReport(report, book.name));
         return report.ok ? 0 : 1;
+      }
+      case 'char': {
+        validateRhymeOptions(flags);
+        const chars = first.match(/\p{Script=Han}/gu) ?? [];
+        if (!chars.length) throw new UsageError('char 须提供至少一个汉字');
+        const { rhymebook, kind } = flags;
+        const tables = charTables.filter(table => !rhymebook ||
+          (table.rhymebook === rhymebook && (!kind || !table.kind || table.kind === kind)));
+        const { charInfo } = await loadProsody();
+        const entries = chars.map(char => ({
+          char,
+          ...Object.fromEntries(tables.map(table => [table.key, charInfo(char, table.rhymebook, table.kind)])),
+        }));
+        if (flags.json) show(entries);
+        else {
+          console.log(entries.map(entry => [
+            entry.char, ...tables.map(({ key, label }) => `${label} ${formatReadings(entry[key])}`),
+          ].join('　')).join('\n'));
+        }
+        break;
+      }
+      case 'rhymes': {
+        const { rhymebook, kind = 'shi', tone } = flags;
+        if (!rhymebook) throw new UsageError('rhymes 须指定 --rhymebook');
+        validateRhymeOptions(flags);
+        if (tone && !['平', '仄'].includes(tone)) throw new UsageError('--tone 须为平或仄');
+        const prosody = await loadProsody();
+        if (first === undefined) {
+          const entries = prosody.listRhymes(rhymebook, kind).filter(entry => !tone || entry.tone === tone);
+          if (flags.json) show(entries);
+          else if (entries.length) {
+            console.log(entries.map(entry => `${entry.name}　${entry.tone}　常用 ${entry.common} / 共 ${entry.chars}`).join('\n'));
+          }
+          break;
+        }
+        const rhymes = prosody.rhymeChars(first, rhymebook, kind);
+        if (!rhymes.length) {
+          const listCommand = `tuiqiao rhymes --rhymebook ${rhymebook}${kind === 'ci' ? ' --kind ci' : ''}`;
+          throw new Error(`未找到韵部「${first}」。运行 ${listCommand} 查看全部韵名`);
+        }
+        const entries = rhymes.filter(entry => !tone || entry.tone === tone)
+          .map(entry => ({ ...entry, rare: flags.all ? entry.rare : '' }));
+        if (flags.json) show(entries);
+        else if (entries.length) {
+          const name = prosody.bookName(rhymebook, kind);
+          console.log(entries.map(entry =>
+            `${entry.name} · ${entry.tone} · ${name}　常用 ${Array.from(entry.common).length} 字\n${entry.common}${entry.rare}`).join('\n'));
+        }
+        break;
       }
       case 'create': {
         let url;
@@ -307,7 +378,10 @@ export async function runCli([command, ...args], { loadProsody, bin }) {
         break;
       }
       case 'list': {
-        const games = store.listGames().map(toListItem);
+        const games = store.listGames().map(game => {
+          const { grades, ...item } = toListItem(game);
+          return item;
+        });
         if (flags.json) show(games);
         else {
           for (const game of games) {

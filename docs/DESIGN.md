@@ -25,6 +25,7 @@
 - **格（cell）**：句中的一个字位，用 \`"j.i"\`（句下标.字下标）寻址。
 - **阕**：词的分段；\`stanzaEnd: true\` 标在一阕的最后一句上（最后一阕也标）。诗视为一阕。
 - **韵书（rhymebook）**：\`xinyun\` = 中华新韵（十四韵，阴平阳平为平，上去为仄，无入声）；\`guyun\` = 古韵（诗依平水韵，词依词林正韵，入声归仄）。
+- **档（mode）**：六档由易到难为 \`ze\` 择字、\`bian\` 辨字、\`chai\` 拆篇（合称「选字」三档，\`group: 'xuan'\`，字从字盘里拣，见 §6.5）与 \`zi\` 填字、\`ju\` 补句、\`fu\` 自赋（合称「落笔」三档，\`group: 'xie'\`，字自己写）。选字三档与 zi 档一样是对着原作填空：**下文凡写「zi / ju 档」的规则，除 §6.5 另有说明外，选字三档同样适用。**
 - **体裁种类（kind）**：\`shi\`（五绝 / 七绝 / 五律 / 七律）、\`ci\`（钦定词谱收录的词牌、曲牌）、\`free\`（谱库里没有的体裁，不校验格律）。
 
 ## 2. 韵律核心 \`src/prosody/index.js\`
@@ -42,6 +43,9 @@ sampleForms(n = 4, rng = Math.random)  // → FormSummary[]，从常用体裁里
 resolveForm(nameOrAlias)               // → FormDef | null（接受别名、「七言绝句」这类全称、带「·」后缀的写法）
 charInfo(ch, rhymebook, kind = 'shi')  // → CharInfo
 simplify(ch)                           // → string，繁体单字折成简体（data/simplified.json），无映射则原样
+listRhymes(rhymebook, kind = 'shi')    // → RhymeSummary[]，该韵表的全部韵（§2.3）
+rhymeChars(name, rhymebook, kind = 'shi', tone) // → RhymeChars[]，某韵部的字；tone 省略时该名下的平、仄各一条，查无此名为 []
+bookName(rhymebook, kind = 'shi')      // → '中华新韵' | '平水韵' | '词林正韵'，实际查的那张韵表的名字
 splitPoem(text)                        // → { ju: [{ text, punct }], stanzaBreaks: number[] }
 checkPoem({ form, rhymebook, text, ju, variant = 'auto', partial = false }) // → Report
 ~~~
@@ -65,6 +69,11 @@ JuPattern   = { tones: string,           // 每字一个字符，取 '平' | '�
 CharInfo    = { char: string, known: boolean,
                 tones: ('平'|'仄')[],    // 去重；多音字可能两者都有；unknown 时为 []
                 readings: [{ tone: '平'|'仄', sheng: string /* 阴平|阳平|上|去|入|平 */, rhyme: string /* 韵部名，如 '七阳' '一东' '第三部' */, pinyin?: string }] }
+RhymeSummary = { name: string, tone: '平'|'仄', sheng: string[] /* 所含的声，如 ['上','去'] */,
+                 chars: number /* 全部字数 */, common: number /* 其中常用字数 */ }
+RhymeChars  = { name: string, tone: '平'|'仄',
+                common: string,          // 常用字连成一串，依一级字表次序（即拼音序）
+                rare: string }           // 其余的字，依码位序
 Report      = { ok: boolean,             // 没有 error 级问题（partial 时只看已填的格）
                 complete: boolean,       // 所有字位都已填
                 form: { id, name, kind }, rhymebook: 'xinyun'|'guyun',
@@ -96,6 +105,19 @@ Report      = { ok: boolean,             // 没有 error 级问题（partial 时
 
 **自由体（free）**：\`resolveForm\` 返回 null 时，\`checkPoem({ form: '任意名字', ... })\` 仍须返回 Report：\`form.kind = 'free'\`，\`variant: null\`，句结构取自输入本身，所有 \`want\` 为「中」，\`issues\` 只可能有 \`unknown-char\`，\`rhymes\` 为空数组。
 
+### 2.3 查韵
+
+供出题模型（CLI \`char\` / \`rhymes\`）与网页的「查韵」共用。
+
+- **韵表**由 \`(rhymebook, kind)\` 决定：\`xinyun\` → 中华新韵；\`guyun\` + \`ci\` → 词林正韵；\`guyun\` + \`shi\` / \`free\` → 平水韵。与 \`charInfo\` 的取表规则一致。
+- **一个韵 = 韵部名 + 平仄**，即押韵时须相同的那个单位：
+  - 新韵：十四个韵部各有平（阴平、阳平）、仄（上、去）两条。
+  - 词林正韵：前十四部各有平、仄（上去通押，合为一条）两条；入声五部（第十五至十九部）只有仄一条。
+  - 平水韵：一百零六韵各只一条，平声韵为平，上、去、入声韵为仄。
+- \`listRhymes\` 依韵书次序列出，同名者先平后仄。
+- **常用字**：该字在 \`data/common.json\`（GB2312 一级字表，3755 字，一个 JSON 字符串）里。有简体映射而与自身不同的繁体字（\`simplify(ch) !== ch\`）一律归入 \`rare\`，免得与简体重出。
+- 多音字在它的每个读音所属的韵里各出现一次。
+
 ## 3. 对局文件（\`tuiqiao create <game.json>\` 的输入）
 
 ~~~jsonc
@@ -108,7 +130,8 @@ Report      = { ok: boolean,             // 没有 error 级问题（partial 时
   "rhymebook": "xinyun",                 // 必填：xinyun | guyun
   "story": "……",                         // 必填，谜面。纯文本，段落以空行分隔
   "poem": "折戟沉沙铁未销，自将磨洗认前朝。\n东风不与周郎便，铜雀春深锁二乔。", // 必填，谜底，带标点；词以空行分阕
-  "cloze": "折戟沉沙【铁】未销，自将【磨洗】认前朝。\n……",  // 选填，填字档的挖空：与 poem 完全相同，只是把要挖的字用【】括起
+  "cloze": "折戟沉沙【铁】未销，自将【磨洗】认前朝。\n……",  // 选填，填字档（及择字、辨字档）的挖空：与 poem 完全相同，只是把要挖的字用【】括起
+  "decoys": "铜尚拭辨",                  // 选填，辨字档的干扰字：一串汉字（其它字符忽略），至多取前 12 个（§6.5）
   "hiddenLines": [2, 4],                 // 选填，补句档要藏的句（从 1 起）
   "glosses": ["……", "……", "……", "……"],  // 选填，逐句白话句意，长度须等于句数
   "imagery": ["东风", "折戟", "铜雀台"], // 选填，自赋档的意象提示，至多 8 条
@@ -116,7 +139,9 @@ Report      = { ok: boolean,             // 没有 error 级问题（partial 时
 }
 ~~~
 
-校验（任何一条不过都以 exit 1 结束，并在 stdout 的 JSON 里给出可据以修改的 \`errors\`）：必填项齐全；\`cloze\` 去掉【】后须与 \`poem\` 逐字相同；\`hiddenLines\` 在句数范围内且不得藏全部句；\`glosses\` 长度等于句数；格律校验 \`checkPoem\` 有 error 时拒绝，除非带 \`--allow-flaws\`（此时把 issues 存进对局，揭晓时如实展示）。
+校验（任何一条不过都以 exit 1 结束，并在 stdout 的 JSON 里给出可据以修改的 \`errors\`）：必填项齐全；\`cloze\` 去掉【】后须与 \`poem\` 逐字相同；\`hiddenLines\` 在句数范围内且不得藏全部句；\`glosses\` 长度等于句数；\`decoys\` 须为文本；格律校验 \`checkPoem\` 有 error 时拒绝，除非带 \`--allow-flaws\`（此时把 issues 存进对局，揭晓时如实展示）。
+
+对局里存 \`decoys: string[]\`（依次取出的汉字，去重，至多 12 个；没给则为 \`[]\`，旧对局没有此字段时同样视为空）。
 
 缺省：无 \`cloze\` 时自动挖空（约三成字，每句至少一字，用对局 id 作种子保证可复现）；无 \`hiddenLines\` 时，诗藏偶数句，词与自由体隔句藏（第 2、4、6… 句）。
 
@@ -138,6 +163,8 @@ Report      = { ok: boolean,             // 没有 error 级问题（partial 时
 | \`forms [--sample N] [--kind shi\|ci] [--all] [--json]\` | 列体裁。缺省只列常用；\`--sample N\` 随机取 N 个常用体裁（给模型出选项用） | 文本，每行「名称　字数　一句话格式」；\`--json\` 出 FormSummary[] |
 | \`form <名称> [--json]\` | 看某体裁的谱（全部变体，标出平仄与韵位） | 文本；\`--json\` 出 FormDef |
 | \`check --form <名称> --rhymebook <id> [--variant N] [文件\|-]\` | 校验一首诗（文件或 stdin） | 文本报告（见下）；\`--json\` 出 Report。有 error 时 exit 1 |
+| \`char <字…> [--rhymebook xinyun\|guyun] [--kind shi\|ci] [--json]\` | 查字的平仄、声、韵部。位置参数是一串字（如 \`白月石客\`），非汉字忽略。不给 \`--rhymebook\` 时三张韵表都查；给 \`guyun\` 而不给 \`--kind\` 时查平水韵与词林正韵 | 文本，每字一行：\`白　新韵 阳平·四开（平）　平水 入·十一陌（仄）　词林 入·第十七部（仄）\`，多音以「/」隔开，未收写「未收」；\`--json\` 出 \`[{ char, xinyun?, pingshui?, cilin? }]\`（值为 CharInfo，只含查了的表） |
+| \`rhymes [韵部] --rhymebook <id> [--kind shi\|ci] [--tone 平\|仄] [--all] [--json]\` | 不给韵部：列出该韵表的全部韵。给韵部：列出该韵的常用字，\`--all\` 连僻字一起列，\`--tone\` 只看平或仄。\`--kind\` 缺省 \`shi\`。韵部名不存在时 exit 1 | 文本：列韵时每行 \`七阳　平　常用 145 / 共 273\`；列字时每条一个标题行（\`七阳 · 平 · 平水韵　常用 145 字\`）加一行字；\`--json\` 出 RhymeSummary[] / RhymeChars[]（不带 \`--all\` 时 \`rare\` 为空串） |
 | \`create <game.json> [--allow-flaws] [--rm] [--no-start]\` | 校验并建局；服务没起则自动起（除非 \`--no-start\`）；\`--rm\` 建局成功后删掉输入文件 | JSON：\`{ ok: true, id, url, title, form, rhymebook, flaws: Issue[] }\`；失败 \`{ ok: false, errors: string[], report? }\` |
 | \`wait <id> [--timeout 秒=540]\` | 阻塞到玩家交卷（每 500ms 查一次文件） | 交卷：Result JSON（§7）；超时：\`{ status: "pending", ... }\` 且 exit 3 |
 | \`result <id>\` | 立即返回当前结果，不阻塞 | 同上（未交卷时 \`status\` 为 \`new\` / \`playing\`，exit 0） |
@@ -171,16 +198,17 @@ Report      = { ok: boolean,             // 没有 error 级问题（partial 时
 | 方法与路径 | 请求体 | 说明 |
 | --- | --- | --- |
 | \`GET /api/meta\` | — | \`{ name: 'tuiqiao', version }\` |
-| \`GET /api/games\` | — | \`{ games: [{ id, title, subjects, form: { name }, status, mode, createdAt }] }\`，新的在前 |
+| \`GET /api/games\` | — | \`{ games: [{ id, title, subjects, form: { name }, status, mode, grades, createdAt }] }\`，新的在前。\`grades\` 是 \`{ yuan: string\|null /* 合原：score.grade */, pin: string\|null /* 诗品：review.grade，只有 ju / fu 档有，其余恒为 null */ }\` |
 | \`GET /api/games/:id\` | — | View（§6.1） |
-| \`POST /api/games/:id/mode\` | \`{ mode }\` | 选难度。状态为 \`new\` 时任选；\`playing\` 时只许降档（fu → ju → zi），降档会清空已填内容与反馈，checks 与 hints 累计保留；其它情况 409 |
+| \`GET /api/games/:id/lookup?chars=…\` 或 \`?rhyme=…&tone=…\` | — | 查韵（§6.4） |
+| \`POST /api/games/:id/mode\` | \`{ mode }\` | 选难度，\`mode\` 为六档之一。状态为 \`new\` 时任选；\`playing\` 时只许降档（fu → ju → zi → chai → bian → ze，可以跨档），降档会清空已填内容与反馈，checks 与 hints 累计保留；其它情况 409 |
 | \`POST /api/games/:id/draft\` | \`{ cells }\` 或 \`{ text }\` | 只存草稿，不给反馈、不计次 |
 | \`POST /api/games/:id/check\` | \`{ cells }\` 或 \`{ text }\` | zi / ju：存草稿、计一次「试」、算出每个空格的反馈。fu：存草稿、不计次、刷新 \`play.report\` |
 | \`POST /api/games/:id/hint\` | \`{ type: 'pattern' }\`、\`{ type: 'char', j, i }\`、\`{ type: 'gloss', j }\`、\`{ type: 'imagery' }\` | 取提示（§6.2） |
 | \`POST /api/games/:id/submit\` | \`{ cells }\` 或 \`{ text }\` | 交卷：存草稿、算终局反馈与分数、状态变 \`submitted\` |
 | \`POST /api/games/:id/reveal\` | — | 揭晓原作，仅 \`submitted\` / \`revealed\` 可调，状态变 \`revealed\` |
 
-所有 POST 成功后都返回最新的 View。\`cells\` 是 \`{ "j.i": "字" }\`，只收空格位的输入，每格取首个字符，给定字位与越界的键忽略；\`text\` 仅用于「自由体 + 自赋」。
+所有 POST 成功后都返回最新的 View。\`cells\` 是 \`{ "j.i": "字" }\`，只收空格位的输入，每格取首个字符，给定字位与越界的键忽略（选字三档还要过字盘，见 §6.5）；\`text\` 仅用于「自由体 + 自赋」。
 
 ### 6.1 View
 
@@ -193,13 +221,15 @@ View = {
   rhymebook: { id, name },
   story: string, createdAt: string /* ISO */,
   status: 'new'|'playing'|'submitted'|'revealed',
-  modes: [{ id: 'zi'|'ju'|'fu', name: '填字'|'补句'|'自赋', blanks: number /* zi：空格数；ju：所藏句数；fu：总字数 */ }],
+  modes: [{ id: 'ze'|'bian'|'chai'|'zi'|'ju'|'fu', name: '择字'|'辨字'|'拆篇'|'填字'|'补句'|'自赋',   // 由易到难，恒为六条
+            group: 'xuan'|'xie',
+            blanks: number /* ze / bian / zi：空格数；chai / fu：总字数；ju：所藏句数 */ }],
   play: null | {
-    mode: 'zi'|'ju'|'fu',
+    mode: 'ze'|'bian'|'chai'|'zi'|'ju'|'fu',
     freeText: boolean,                 // 自由体 + 自赋：没有格子，只有一个文本框
     text: string|null,                 // freeText 时的草稿
     glosses?: [{ j: number, text: string }],  // 仅 freeText：已取的句意（此时没有 board 可挂）
-    patternShown: boolean,             // fu 档恒为 true（自由体除外）；zi / ju 档取了 pattern 提示后为 true
+    patternShown: boolean,             // fu 档与选字三档恒为 true（自由体除外）；zi / ju 档取了 pattern 提示后为 true
     variantLabel: string|null,         // patternShown 时给出，如「仄起首句入韵」
     board: null | { ju: [{             // freeText 时为 null
       end: '句'|'韵'|'读'|'叠'|'叶', punct: string, stanzaEnd: boolean,
@@ -210,15 +240,22 @@ View = {
         char: string|null,               // given / hinted 为原字；blank 为 null
         input: string|null,              // blank 位玩家当前所填
         want: '平'|'仄'|'中'|null,       // patternShown 为 false 时为 null
-        fb: 'hit'|'rhyme'|'tone'|'present'|'miss'|null   // 最近一次 check / submit 的反馈；之后改动过的格由前端自行清掉
+        fb: 'hit'|'rhyme'|'tone'|'present'|'miss'|null,  // 最近一次 check / submit 的反馈；之后改动过的格由前端自行清掉
+        tried: [{ char: string, fb: 'hit'|'rhyme'|'tone'|'present'|'miss' }]  // 曾试之字（见下）；非 blank 格与 fu 档为 []
       }] }] },
+    pools: null | [{                   // 字盘，仅选字三档（§6.5）；其余档为 null
+      ju: number[],                    // 这一盘管哪几句（句下标，升序）；各盘合起来恰好覆盖有空格的句，ze / bian 只有一盘
+      tiles: [{ char: string, tones: ('平'|'仄')[] }]   // 盘里的字，已洗过；同一个字有几枚就出现几次。已揭开的格所占的那枚不在其中
+    }],
     checks: number,
     hints: { pattern: boolean, chars: number, glosses: number, imagery: string[] },
     hintsLeft: { imagery: number, glosses: number[] /* 还可取句意的句下标 */ },
     report: null | { ok, complete, issues: Issue[], stats, rhymes },   // 仅 fu 档：玩家草稿的格律报告（不含 ju）
     submittedAt: string|null,
-    score: null | { hit: number, total: number, points: number, grade: string },  // zi / ju 交卷后给出；fu 为 null
-    review: null | { grade: string|null, comment: string, highlights: [{ quote: string, note: string }], at: string }
+    score: null | { hit: number, total: number, points: number, grade: string },  // zi / ju 交卷后给出；fu 为 null。grade 即「合原」
+    prosody: null | { ok: boolean, complete: boolean|null, issues: Issue[] },     // 交卷后给出：玩家版本的格律（见下）；未交卷、自由体为 null
+    review: null | { grade: string|null /* 「诗品」，ju / fu 档由评点人给；zi 档网页不展示 */,
+                     comment: string, highlights: [{ quote: string, note: string }], at: string }
   },
   reveal: null | {                      // 仅 status 为 revealed 时
     poem: string,                       // 原作全文（带标点）
@@ -241,20 +278,57 @@ fu 档的 board：诗用所选体裁的句结构，\`want\` 随玩家草稿在�
 4. \`tone\`：平仄与原作该字相同（多音字任一读音相同即可）。
 5. \`miss\`：以上皆非。空格不打反馈（null）。
 
+选字三档只有 \`hit\` 与 \`miss\`：盘是封闭的，「同韵」「平仄合」不再带什么信息。
+
+**曾试之字 \`tried\`**（zi / ju 档）：每次 \`check\` 算出反馈后，把每个已填的 blank 格的「字 + 反馈」记进该格的 \`tried\`。同一格再试同一个字时不重复记，只把那一条的反馈更新为最新的（\`present\` 会随句中别的格而变）；每格只留最近 12 条，先试的在前。\`submit\` 不记。该格被揭字后清掉它的记录；换档（\`mode\`）时全部清空。存于 \`play.tried\`（\`{ "j.i": [{ char, fb }] }\`），旧对局没有这个字段时视为空。
+
+**玩家版本的格律 \`prosody\`**：交卷时对玩家版本（原作给出的字 + 玩家所填）跑一次 \`checkPoem({ partial: true })\` 存下。fu 档原样给出。zi / ju 档要守住「不泄露原作瑕疵」：凡与原作自身的 issue 相同者（\`code\`、\`ju\`、\`pos\`、\`message\` 全同）一律滤去，\`ok\` 按滤后是否还有 error 重算。\`complete\` 为是否每格都有字（旧对局没存时为 null）。给模型的 Result 里的 \`prosody\` 不滤。
+
 ### 6.2 提示
 
-- \`pattern\`（示律）：之后 View 给出每格的 \`want\`、每句的 \`rhyme\` 与 \`variantLabel\`。zi / ju 档记 \`hints.pattern = true\`；fu 档本来就显示，调用无副作用。自由体无谱，返回 409。
-- \`char\`（揭字）：把 \`j.i\` 位变为 \`hinted\`，\`hints.chars += 1\`。仅 zi / ju 档；该位不是 blank 则 409。
+- \`pattern\`（示律）：之后 View 给出每格的 \`want\`、每句的 \`rhyme\` 与 \`variantLabel\`。zi / ju 档记 \`hints.pattern = true\`；fu 档与选字三档本来就显示，调用无副作用、不扣分。自由体无谱，返回 409。
+- \`char\`（揭字）：把 \`j.i\` 位变为 \`hinted\`，\`hints.chars += 1\`。fu 档不可用；该位不是 blank 则 409。选字三档还要从盘里取走一枚（§6.5）。
 - \`gloss\`（句意）：给出第 j 句的白话句意，\`hints.glosses += 1\`。对局没有 glosses 或已取过则 409。三档皆可用。
 - \`imagery\`（意象）：按顺序再给一条意象，追加进 \`hints.imagery\`。取完则 409。三档皆可用。
 
-### 6.3 记分（zi / ju 档，交卷时算）
+### 6.3 记分（fu 以外各档，交卷时算）
 
 \`total\` = 开局时的空格数（含后来被揭开的）；\`hit\` = 终局反馈为 hit 的格数（hinted 不算）。
 
 \`points = round(100 × hit / total) − 3 × max(0, checks − 1) − 6 × hints.chars − 4 × hints.glosses − 2 × hints.imagery.length − (hints.pattern ? 5 : 0)\`，下限 0。
 
 品第：≥95 上上，≥88 上中，≥80 上下，≥70 中上，≥60 中中，≥50 中下，≥35 下上，≥20 下中，其余下下。
+
+### 6.4 查韵
+
+\`GET /api/games/:id/lookup\`，韵表取该局的 \`(rhymebook, form.kind)\`（§2.3）。两种查法二选一，都给或都不给则 400。
+
+- \`?chars=白月\`：查单字。取其中的汉字，1 到 8 个，没有汉字则 400。任何状态可用。返回 \`{ book: string /* bookName */, chars: CharInfo[] }\`。
+- \`?rhyme=七阳&tone=平\`：浏览同韵常用字，\`tone\` 可省。**仅 fu 档或交卷之后可用**，否则 409——填字、补句档若能翻同韵字，韵脚空就成了选择题。返回 \`{ book, rhymes: [{ name, tone, common: string, more: number /* 未列出的僻字数 */ }] }\`，查无此韵时 \`rhymes\` 为 \`[]\`。
+
+查韵不改对局、不计次、不扣分。
+
+### 6.5 选字三档（字盘）
+
+选字三档不用键盘：空格里的字只能从**字盘**（\`play.pools\`）里取，盘上每枚字只能用一次。
+
+| 档 | 空格 | 字盘 |
+| --- | --- | --- |
+| \`ze\` 择字 | 同 zi 档（对局的 \`cloze\`） | 一盘，恰是全部空格的原字 |
+| \`bian\` 辨字 | 同 zi 档 | 一盘，全部空格的原字 + 干扰字 |
+| \`chai\` 拆篇 | 全部字位 | 只有原字，无干扰字。全篇汉字不超过 28 个时一盘，否则分盘 |
+
+- **分盘**（chai 档，全篇汉字多于 28 个）：顺句序把句往当前盘里加；加完一句后，若这句是阕末（\`stanzaEnd\`），或这句押韵（原作 Report 该句 \`rhyme: true\`）且本盘已满 10 字，即收盘；加下一句会使本盘超过 20 字时，先收盘再加。律诗因此两句一盘。
+- **干扰字**（bian 档）：目标数 \`D = min(10, max(3, ceil(空格数 / 2)))\`。
+  1. 先依次取对局的 \`decoys\`，去掉与任一空格原字相同的（繁简视为同字），全部放进盘里（建局时已限 12 个）。
+  2. 不足 D 个时由服务端补到 D 个：把空格按种子次序排好，轮流取其原字，用 \`charInfo(原字, rhymebook, form.kind)\` 的第一个读音查 \`rhymeChars(该读音的韵, rhymebook, form.kind, 该读音的平仄)\`，在它的常用字里按种子次序取第一个与盘中已有的字都不同（繁简视为同字）的字——与原字同韵同调，放在韵脚上也押得上。原字未收、无字可取时跳过这一格；轮完两圈仍不足 D 个也就此作罢。
+- **洗牌与存储**：盘在 \`setMode\` 时生成，存为 \`play.pools = [{ ju: number[], tiles: string[] }]\`，之后不再变。一盘内的次序按 \`sha256('<id>/<mode>/<盘下标>/<洗牌前的序号>')\` 的前 4 字节升序排定（做法同自动挖空），因此可复现；补干扰字时的「种子次序」同理，键分别用 \`<id>/bian/blank/<格的键>\` 与 \`<id>/bian/pick/<格的键>/<候选字>\`。
+- **View 里的盘**：从 \`play.pools\` 的每一盘里，为该盘所管的每个 hinted 格取走一枚它的原字（取盘中第一枚），余下的依原次序给出，\`tones\` 取 \`charInfo(char, rhymebook, form.kind).tones\`。
+- **收草稿**（draft / check / submit）：在 §6 的通用规则之后再过一遍字盘——按句序、字序依次看每个有输入的格，所填的字须是它所属那一盘里还有余量的字（必须就是盘上那个字，不折繁简），是则扣去一枚，否则丢弃这一格的输入，不报错。
+- **揭字**：该格变 hinted 后，按上一条把已填的格重新过一遍（此时盘里已少了一枚），被丢弃的格连同它的反馈一并清掉。
+- **反馈**只有 \`hit\` / \`miss\`（§6.1）；\`tried\` 照记。
+- **谱**：\`patternShown\` 恒为 \`form.kind !== 'free'\`，\`want\`、\`rhyme\`、\`variantLabel\` 直接给出，不记 \`hints.pattern\`。（若是先在 zi / ju 档取过 pattern 提示再降下来，\`hints.pattern\` 照旧保留。）
+- **记分**同 §6.3，\`total\` 为该档开局时的空格数。没有「诗品」。
 
 ## 7. 给模型的结果与评点
 
@@ -264,10 +338,10 @@ fu 档的 board：诗用所选体裁的句结构，\`want\` 随玩家草稿在�
 {
   "status": "submitted",               // new | playing | submitted | revealed | pending（仅 wait 超时）
   "id": "k3f9qz", "title": "赤壁", "form": "七绝", "rhymebook": "xinyun",
-  "mode": "zi", "modeName": "填字",
+  "mode": "zi", "modeName": "填字",    // mode 为六档之一，modeName 是它的中文名
   "original": "折戟沉沙铁未销，……",     // 原作全文
   "player": "折戟沉沙水未销，……",       // 玩家版本全文（未填处为 □；freeText 时就是玩家的文本）
-  "diffs": [{ "ju": 1, "pos": 5, "original": "铁", "player": "水", "fb": "tone" }],  // zi / ju：与原作不同的格（序号从 1 起）
+  "diffs": [{ "ju": 1, "pos": 5, "original": "铁", "player": "水", "fb": "tone" }],  // fu 以外各档：与原作不同的格（序号从 1 起）
   "score": { "hit": 9, "total": 12, "points": 66, "grade": "中中" },                 // fu 为 null
   "checks": 3, "hints": { "pattern": true, "chars": 1, "glosses": 0, "imagery": [] },
   "prosody": { "ok": true, "issues": [] },   // 玩家版本的格律报告摘要（Report 的 ok 与 issues）
@@ -280,7 +354,8 @@ fu 档的 board：诗用所选体裁的句结构，\`want\` 随玩家草稿在�
 
 ~~~jsonc
 {
-  "grade": "上中",        // 选填，九品之一；fu 档由评点人定品，zi / ju 档可不填（网页用 score.grade）
+  "grade": "上中",        // 选填，九品之一，即「诗品」。fu / ju 档由评点人给：ju 档评的是玩家补的句子本身，与是否合原无关，
+                          // 网页把它与按得分算出的「合原」（score.grade）并列盖印；zi 档与选字三档不填，填了网页也不展示
   "comment": "……",        // 必填，总评，纯文本，段落以空行分隔
   "highlights": [{ "quote": "水未销", "note": "……" }]   // 选填，逐处点评，至多 6 条
 }

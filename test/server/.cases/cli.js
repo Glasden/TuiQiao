@@ -78,6 +78,71 @@ test('CLI 中文用法、未知命令与失效服务状态', async t => {
   assert.deepEqual(json(['stop']), { ok: true, stopped: false });
 });
 
+test('CLI char 可按韵表查字，输出文本或 JSON', { skip: noProsody }, async t => {
+  const { run, json } = await fixture(t);
+  const usage = run(['--help']).stdout;
+  assert.match(usage, /char <字…>/);
+  assert.match(usage, /rhymes \[韵部\]/);
+  assert.deepEqual(run(['char', '白，石a𠮷']).stdout.trimEnd().split('\n'), [
+    '白　新韵 阳平·四开（平）　平水 入·十一陌（仄）　词林 入·第十七部（仄）',
+    '石　新韵 去·八寒（仄）/阳平·十三支（平）　平水 入·十一陌（仄）　词林 入·第十七部（仄）',
+    '𠮷　新韵 未收　平水 未收　词林 未收',
+  ]);
+  const [all] = json(['char', '白', '--json']);
+  assert.deepEqual(Object.keys(all), ['char', 'xinyun', 'pingshui', 'cilin']);
+  assert.deepEqual(all.xinyun, {
+    char: '白', known: true, tones: ['平'],
+    readings: [{ tone: '平', sheng: '阳平', rhyme: '四开', pinyin: 'bái' }],
+  });
+  assert.deepEqual(json(['char', '白', '--rhymebook', 'guyun', '--json']),
+    [{ char: '白', pingshui: all.pingshui, cilin: all.cilin }]);
+  assert.deepEqual(json(['char', '白', '--rhymebook', 'guyun', '--kind', 'ci', '--json']),
+    [{ char: '白', cilin: all.cilin }]);
+  assert.deepEqual(json(['char', '白', '--rhymebook', 'xinyun', '--json']),
+    [{ char: '白', xinyun: all.xinyun }]);
+  assert.match(run(['char', 'abc，！'], 2).stderr, /汉字/);
+});
+
+test('CLI rhymes 可列韵和韵字，按平仄筛选并选择是否包含僻字', { skip: noProsody }, async t => {
+  const { run, json } = await fixture(t);
+  const list = ['rhymes', '--rhymebook', 'guyun'];
+  const words = ['rhymes', '七阳', '--rhymebook', 'guyun'];
+  assert.match(run(list).stdout, /^七阳　平　常用 145 \/ 共 273$/m);
+  const oblique = json([...list, '--tone', '仄', '--json']);
+  assert.equal(oblique.length, 76);
+  assert.ok(oblique.every(entry => entry.tone === '仄'));
+  const [header, common] = run(words).stdout.trimEnd().split('\n');
+  assert.equal(header, '七阳 · 平 · 平水韵　常用 145 字');
+  assert.equal(common.length, 145);
+  assert.ok(common.includes('阳'));
+  assert.deepEqual(json([...words, '--json']), [{ name: '七阳', tone: '平', common, rare: '' }]);
+  const [all] = json([...words, '--all', '--tone', '平', '--json']);
+  assert.equal([...all.rare].length, 128);
+  assert.equal(run([...words, '--all']).stdout.trimEnd(), `${header}\n${common}${all.rare}`);
+  assert.deepEqual(json([...words, '--tone', '仄', '--json']), []);
+  const [ci] = json(['rhymes', '第十七部', '--rhymebook', 'guyun', '--kind', 'ci', '--json']);
+  assert.equal(ci.tone, '仄');
+  assert.match(run([...list, '无此韵'], 1).stderr, /tuiqiao rhymes --rhymebook guyun/);
+  assert.match(run([...list, ''], 1).stderr, /未找到韵部/);
+  assert.match(run(['rhymes'], 2).stderr, /--rhymebook/);
+  assert.match(run([...list, '--tone', '入'], 2).stderr, /--tone/);
+});
+
+test('CLI create 校验干扰字类型并将去重后的汉字写入对局', { skip: noProsody }, async t => {
+  const { home, json } = await fixture(t);
+  const path = join(home, 'source.json');
+  const args = ['create', path, '--no-start'];
+  await writeFile(path, JSON.stringify({ ...source, decoys: ['铁'] }));
+  const invalid = json(args, 1);
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.errors.join('\n'), /decoys 须为文本/);
+  await writeFile(path, JSON.stringify({ ...source, decoys: '銅，𠮷铜 銅a' }));
+  const created = json(args);
+  assert.equal(created.ok, true);
+  const stored = JSON.parse(await readFile(join(home, 'games', `${created.id}.json`), 'utf8'));
+  assert.deepEqual(stored.decoys, [...'銅𠮷铜']);
+});
+
 test('技能安装可覆盖同名文件并替换占位符', { skip: noSkill }, async t => {
   const { home, json } = await fixture(t);
   const target = join(home, 'skills');
@@ -165,7 +230,9 @@ test('CLI 用真实韵律核心建局、后台起停、等待交卷与回写评�
     const unveiled = await post('reveal');
     assert.equal(unveiled.play.review.comment, '评点');
     assert.equal(unveiled.reveal.poem, source.poem);
-    assert.equal(json(['list', '--json']).find(entry => entry.id === game.id).status, 'revealed');
+    const listed = json(['list', '--json']).find(entry => entry.id === game.id);
+    assert.equal(listed.status, 'revealed');
+    assert.ok(!Object.hasOwn(listed, 'grades'));
     assert.deepEqual(json(['stop']), { ok: true, stopped: true, pid: serverPid });
     assert.equal(existsSync(serverFile), false);
     assert.equal(json(['status']).running, false);
