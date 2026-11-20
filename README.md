@@ -94,3 +94,7 @@ node scripts/build-data.mjs                  # 从 .cache/sources/ 重建 data/�
 ~~~
 
 接口契约见 \`docs/DESIGN.md\`。数据来源与许可见 \`data/SOURCES.md\`。
+
+## 许可
+
+[Apache License 2.0](LICENSE)。`data/` 下由上游数据构建的文件另循各自的许可，见 `data/SOURCES.md`。
