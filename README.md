@@ -110,6 +110,10 @@ node scripts/build-data.mjs                  # 从 .cache/sources/ 重建 data/�
 
 接口契约见 `docs/DESIGN.md`。数据来源与许可见 `data/SOURCES.md`。
 
+## 友情链接
+
+- [**LINUX DO**](https://linux.do) — 新的理想型社区：真诚、友善、团结、专业，共建你我引以为荣之社区。
+
 ## 许可
 
 [Apache License 2.0](LICENSE)。`data/` 下由上游数据构建的文件另循各自的许可，见 `data/SOURCES.md`。
