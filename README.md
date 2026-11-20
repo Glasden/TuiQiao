@@ -8,9 +8,9 @@
 
 | 部件 | 位置 | 做什么 |
 | --- | --- | --- |
-| SKILL | \`skill/tuiqiao/SKILL.md\` | 教 harness 里的模型怎么提问、创作、建局、评点 |
-| CLI | \`bin/tuiqiao.js\` | 格律校验、建局、起停本地服务、等交卷、回写评点 |
-| 网页 | \`web/\` | 读谜面、选难度、逐格填词、看朱批、揭晓原作 |
+| SKILL | `skill/tuiqiao/SKILL.md` | 教 harness 里的模型怎么提问、创作、建局、评点 |
+| CLI | `bin/tuiqiao.js` | 格律校验、建局、起停本地服务、等交卷、回写评点 |
+| 网页 | `web/` | 读谜面、选难度、逐格填词、看朱批、揭晓原作 |
 
 Node ≥ 18，零依赖，无构建步骤。
 
@@ -35,7 +35,7 @@ node bin/tuiqiao.js skill install            # 把 SKILL 装进 ~/.claude/skills
 
 然后在任何能加载 skill 的 harness 里说一句「来一局推敲」，再报上你想写的人与事。模型会问你取向（依史实 / 改写）、体裁、韵书，随后给你一个本地链接。
 
-想直接用命令行：\`npm link\` 之后即有 \`tuiqiao\` 命令，\`tuiqiao --help\` 列出全部用法。
+想直接用命令行：`npm link` 之后即有 `tuiqiao` 命令，`tuiqiao --help` 列出全部用法。
 
 ## 玩法
 
@@ -81,8 +81,8 @@ tuiqiao rhymes 七阳 --rhymebook guyun        # 查韵：同韵的常用字
 
 ## 运行细节
 
-- 服务缺省监听 \`127.0.0.1:7117\`，端口被占则顺延；对局存在 \`~/.tuiqiao/games/\`。
-- 环境变量：\`TUIQIAO_PORT\`、\`TUIQIAO_HOST\`、\`TUIQIAO_PUBLIC_URL\`（经隧道或端口转发访问时，覆盖对外展示的地址）、\`TUIQIAO_HOME\`。
+- 服务缺省监听 `127.0.0.1:7117`，端口被占则顺延；对局存在 `~/.tuiqiao/games/`。
+- 环境变量：`TUIQIAO_PORT`、`TUIQIAO_HOST`、`TUIQIAO_PUBLIC_URL`（经隧道或端口转发访问时，覆盖对外展示的地址）、`TUIQIAO_HOME`。
 - 网页的楷体与宋体从 jsDelivr 加载（霞鹜文楷、思源宋体）；离线时退回系统自带的楷体、宋体，功能不受影响。
 - 谜底的保密靠 SKILL 的约束：能派子代理的 harness 由子代理创作并建局，主对话里不出现诗；不能派子代理时，谜底会出现在工具调用的参数里，别去展开它。
 
@@ -93,7 +93,7 @@ npm test                                     # node --test，全部测试
 node scripts/build-data.mjs                  # 从 .cache/sources/ 重建 data/（来源见 data/SOURCES.md）
 ~~~
 
-接口契约见 \`docs/DESIGN.md\`。数据来源与许可见 \`data/SOURCES.md\`。
+接口契约见 `docs/DESIGN.md`。数据来源与许可见 `data/SOURCES.md`。
 
 ## 许可
 
