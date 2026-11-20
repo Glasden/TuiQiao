@@ -4,6 +4,21 @@
 
 一款由大模型出题的诗词小游戏。你说出一个或几个人物、事件，模型据此写一段背景故事（谜面）和一首格律诗词（谜底）；你在本地网页上读故事，填字、补句，或者干脆自己赋一首，最后揭晓模型的原作，看它如何评点你的推敲。
 
+<table>
+  <tr>
+    <td width="33%" valign="top"><a href="docs/screenshots/opening.webp"><img src="docs/screenshots/opening.webp" alt="开局：读谜面，择难度"></a></td>
+    <td width="33%" valign="top"><a href="docs/screenshots/playing.webp"><img src="docs/screenshots/playing.webp" alt="局中：辨字档，从字盘拣字落格"></a></td>
+    <td width="33%" valign="top"><a href="docs/screenshots/revealed.webp"><img src="docs/screenshots/revealed.webp" alt="结束：品第、评点与原作"></a></td>
+  </tr>
+  <tr>
+    <td align="center">开局：读谜面，择难度</td>
+    <td align="center">局中（辨字）：拣字落格，「试」后圈为字合、抹为未合</td>
+    <td align="center">结束：品第、评点，揭晓原作对照</td>
+  </tr>
+</table>
+
+示范局：贾岛、韩愈、推敲，浣溪沙，中华新韵。
+
 三个部件：
 
 | 部件 | 位置 | 做什么 |
