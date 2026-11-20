@@ -16,6 +16,19 @@ Node ≥ 18，零依赖，无构建步骤。
 
 ## 开始
 
+把下面这段交给你的 agent，它会给自己装上 SKILL，然后陪你开一局：
+
+~~~text
+请为你自己装上「推敲」这个 skill：先取得仓库（已有就跳过）
+git clone https://github.com/Glasden/TuiQiao.git
+再在仓库根目录运行
+node bin/tuiqiao.js skill install <你的 harness 加载 skill 的目录>
+（Claude Code 可省略目录，默认装到 ~/.claude/skills）。
+装好后若本会话还没加载上它，就直接读装好的 SKILL.md，照它的流程陪我开一局推敲。
+~~~
+
+也可以自己装：
+
 ~~~sh
 node bin/tuiqiao.js skill install            # 把 SKILL 装进 ~/.claude/skills（可另给目录）
 ~~~
